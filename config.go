@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -33,6 +32,8 @@ type ProviderConfig struct {
 	Token    string   `toml:"token"`
 	TokenEnv string   `toml:"token_env"`
 	TokenCmd string   `toml:"token_cmd"`
+	Auth     string   `toml:"auth"` // token | gh | glab | az | git-credential | ssh; empty = automatic
+	SSH      string   `toml:"ssh"`  // GitLab auth = "ssh": destination, default git@<host>
 	Protocol string   `toml:"protocol"`
 	Insecure bool     `toml:"insecure"`
 	Archived bool     `toml:"include_archived"`
@@ -62,8 +63,17 @@ default_host = "github.com"   # used for shorthands like "gx cl org/repo"
 protocol = "ssh"              # ssh | https, default clone protocol
 cache_ttl = "15m"             # how long "gx l" reuses the remote repo list
 
-# Tokens are resolved from token, token_env or token_cmd (first set wins).
-# GitHub falls back to "gh auth token", GitLab to "glab config get token".
+# Authentication. With token, token_env or token_cmd set, that token is used.
+# Otherwise gx reuses logins you already have, trying in order:
+#   github     gh auth token          → git credential helper
+#   gitlab     glab                   → git credential helper
+#   azure      git credential helper  → az account get-access-token (dev.azure.com)
+#   bitbucket  git credential helper
+# "git credential helper" = whatever git uses for HTTPS (Git Credential
+# Manager, keychain, libsecret…), so cloning once over HTTPS is enough.
+# Force one method with auth = "token" | "gh" | "glab" | "az" | "git-credential".
+# GitLab only: auth = "ssh" creates a 7-day read_api token with your SSH key
+# (ssh git@host personal_access_token …, GitLab 14.2+) and renews it.
 
 [[provider]]
 type = "github"
@@ -74,22 +84,22 @@ host = "github.com"
 # name = "client-gitlab"
 # type = "gitlab"
 # host = "gitlab.client.com"
-# token_env = "CLIENT_GITLAB_TOKEN"
+# auth = "ssh"                 # or token_env = "CLIENT_GITLAB_TOKEN"
+# ssh = "ssh://git@gitlab.client.com:2222"   # only if SSH is not git@<host>:22
 # owners = ["team/subgroup"]   # path prefixes
 
 # [[provider]]
 # name = "client-azure"
 # type = "azure"
 # url = "https://devops.client.com/tfs/DefaultCollection"  # or https://dev.azure.com/<org>
-# token_cmd = "pass show client/azure-pat"
+# (no token: uses Git Credential Manager; or token_cmd = "pass show client/azure-pat")
 # protocol = "https"
 # owners = ["ProjectA"]        # project names
 
 # [[provider]]
 # type = "bitbucket"
 # host = "bitbucket.org"       # cloud; any other host is treated as Bitbucket Server/DC
-# username = "me@example.com"  # cloud: Atlassian account email (API token) or username (app password)
-# token_env = "BITBUCKET_TOKEN"
+# (no token: uses Git Credential Manager; or set token_env + username, see README)
 # owners = ["workspace"]       # cloud: workspaces, server: project keys
 `
 
@@ -166,49 +176,12 @@ func loadConfig() (*Config, error) {
 			return nil, fmt.Errorf("provider %d: unknown type %q (github, gitlab, bitbucket, azure)", i+1, p.Type)
 		}
 		p.Host = strings.ToLower(p.Host)
+		p.Auth = strings.ToLower(p.Auth)
+		if err := validAuth(*p); err != nil {
+			return nil, fmt.Errorf("provider %s: %w", p.Label(), err)
+		}
 	}
 	return cfg, nil
-}
-
-func (p ProviderConfig) resolveToken() (string, error) {
-	switch {
-	case p.Token != "":
-		return p.Token, nil
-	case p.TokenEnv != "":
-		if v := os.Getenv(p.TokenEnv); v != "" {
-			return v, nil
-		}
-		return "", fmt.Errorf("environment variable %s is empty", p.TokenEnv)
-	case p.TokenCmd != "":
-		return runTokenCmd(p.TokenCmd)
-	}
-	switch p.Type {
-	case "github":
-		if out, err := exec.Command("gh", "auth", "token", "--hostname", p.Host).Output(); err == nil {
-			return strings.TrimSpace(string(out)), nil
-		}
-		return "", fmt.Errorf("no token: set token_env/token_cmd or run \"gh auth login --hostname %s\"", p.Host)
-	case "gitlab":
-		if out, err := exec.Command("glab", "config", "get", "token", "--host", p.Host).Output(); err == nil && len(strings.TrimSpace(string(out))) > 0 {
-			return strings.TrimSpace(string(out)), nil
-		}
-	}
-	return "", fmt.Errorf("no token configured (token, token_env or token_cmd)")
-}
-
-func runTokenCmd(cmd string) (string, error) {
-	var c *exec.Cmd
-	if runtime.GOOS == "windows" {
-		c = exec.Command("cmd", "/C", cmd)
-	} else {
-		c = exec.Command("sh", "-c", cmd)
-	}
-	c.Stderr = os.Stderr
-	out, err := c.Output()
-	if err != nil {
-		return "", fmt.Errorf("token_cmd failed: %w", err)
-	}
-	return strings.TrimSpace(string(out)), nil
 }
 
 func expandHome(p string) string {

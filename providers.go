@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -37,32 +38,22 @@ type Remote struct {
 	URL      RepoURL `json:"-"`
 }
 
-func (p ProviderConfig) list(ctx context.Context) ([]Remote, error) {
-	token, err := p.resolveToken()
+// list returns the provider's repositories and the auth method that worked.
+func (p ProviderConfig) list(ctx context.Context) ([]Remote, string, error) {
+	cred, err := p.credential(ctx)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	c := &apiClient{p: p, token: token, http: &http.Client{Timeout: 30 * time.Second}}
-	if p.Insecure {
-		c.http.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
-	}
-	var out []Remote
-	switch p.Type {
-	case "github":
-		out, err = c.github(ctx)
-	case "gitlab":
-		out, err = c.gitlab(ctx)
-	case "bitbucket":
-		if p.Host == "bitbucket.org" {
-			out, err = c.bitbucketCloud(ctx)
-		} else {
-			out, err = c.bitbucketServer(ctx)
+	out, err := p.listWith(ctx, cred)
+	var se *statusError
+	if errors.As(err, &se) && se.code == http.StatusUnauthorized && cred.Method == "ssh" {
+		// The cached SSH-minted token was revoked; mint a new one once.
+		if cred, err = p.credentialVia(ctx, "ssh", true); err == nil {
+			out, err = p.listWith(ctx, cred)
 		}
-	case "azure":
-		out, err = c.azure(ctx)
 	}
 	if err != nil {
-		return nil, err
+		return nil, cred.Method, err
 	}
 	if !p.Archived {
 		kept := out[:0]
@@ -73,40 +64,96 @@ func (p ProviderConfig) list(ctx context.Context) ([]Remote, error) {
 		}
 		out = kept
 	}
-	return out, nil
+	return out, cred.Method, nil
+}
+
+func (p ProviderConfig) listWith(ctx context.Context, cred credential) ([]Remote, error) {
+	c := newAPIClient(p, cred)
+	switch p.Type {
+	case "github":
+		return c.github(ctx)
+	case "gitlab":
+		return c.gitlab(ctx)
+	case "bitbucket":
+		if p.Host == "bitbucket.org" {
+			return c.bitbucketCloud(ctx)
+		}
+		return c.bitbucketServer(ctx)
+	case "azure":
+		return c.azure(ctx)
+	}
+	return nil, fmt.Errorf("unknown provider type %q", p.Type)
 }
 
 type apiClient struct {
-	p     ProviderConfig
-	token string
-	http  *http.Client
+	p    ProviderConfig
+	http *http.Client
+	// schemes are the ways to present the credential, tried in order; a 401
+	// moves on to the next one for the rest of the session.
+	schemes []func(*http.Request)
+	scheme  int
 }
 
-func (c *apiClient) get(ctx context.Context, u string, auth func(*http.Request), v any) (http.Header, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
-	if err != nil {
-		return nil, err
+func newAPIClient(p ProviderConfig, cred credential) *apiClient {
+	c := &apiClient{p: p, http: &http.Client{Timeout: 30 * time.Second}}
+	if p.Insecure {
+		c.http.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
 	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "gx/"+version)
-	auth(req)
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, err
+	bearer := func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+cred.Secret) }
+	basic := func(r *http.Request) { r.SetBasicAuth(cred.User, cred.Secret) }
+	switch {
+	case p.Type == "github", p.Type == "gitlab", cred.Method == "az":
+		// PATs and OAuth tokens alike are accepted as Bearer.
+		c.schemes = []func(*http.Request){bearer}
+	case p.Type == "azure", cred.User != "":
+		// PATs and passwords go as Basic; OAuth tokens from a credential
+		// manager need Bearer.
+		c.schemes = []func(*http.Request){basic, bearer}
+	default:
+		c.schemes = []func(*http.Request){bearer}
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode/100 != 2 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
-		msg := strings.TrimSpace(string(body))
-		if strings.Contains(resp.Header.Get("Content-Type"), "html") {
-			msg = ""
+	return c
+}
+
+type statusError struct {
+	code int
+	msg  string
+}
+
+func (e *statusError) Error() string { return e.msg }
+
+func (c *apiClient) get(ctx context.Context, u string, v any) (http.Header, error) {
+	for {
+		req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
+		if err != nil {
+			return nil, err
 		}
-		return nil, fmt.Errorf("%s: %s %s", redactURL(u), resp.Status, msg)
+		req.Header.Set("Accept", "application/json")
+		req.Header.Set("User-Agent", "gx/"+version)
+		c.schemes[c.scheme](req)
+		resp, err := c.http.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode == http.StatusUnauthorized && c.scheme+1 < len(c.schemes) {
+			resp.Body.Close()
+			c.scheme++
+			continue
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode/100 != 2 {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
+			msg := strings.TrimSpace(string(body))
+			if strings.Contains(resp.Header.Get("Content-Type"), "html") {
+				msg = ""
+			}
+			return nil, &statusError{resp.StatusCode, fmt.Sprintf("%s: %s %s", redactURL(u), resp.Status, msg)}
+		}
+		if err := json.NewDecoder(resp.Body).Decode(v); err != nil {
+			return nil, fmt.Errorf("%s: decoding response: %w", redactURL(u), err)
+		}
+		return resp.Header, nil
 	}
-	if err := json.NewDecoder(resp.Body).Decode(v); err != nil {
-		return nil, fmt.Errorf("%s: decoding response: %w", redactURL(u), err)
-	}
-	return resp.Header, nil
 }
 
 func redactURL(u string) string {
@@ -116,12 +163,6 @@ func redactURL(u string) string {
 	}
 	pu.RawQuery = ""
 	return pu.String()
-}
-
-func (c *apiClient) bearer(r *http.Request) { r.Header.Set("Authorization", "Bearer "+c.token) }
-
-func (c *apiClient) basic(user string) func(*http.Request) {
-	return func(r *http.Request) { r.SetBasicAuth(user, c.token) }
 }
 
 func (c *apiClient) ownerOK(owner string) bool {
@@ -164,7 +205,7 @@ func (c *apiClient) github(ctx context.Context) ([]Remote, error) {
 				Login string `json:"login"`
 			} `json:"owner"`
 		}
-		h, err := c.get(ctx, next, c.bearer, &page)
+		h, err := c.get(ctx, next, &page)
 		if err != nil {
 			return nil, err
 		}
@@ -192,7 +233,6 @@ func (c *apiClient) gitlab(ctx context.Context) ([]Remote, error) {
 	if !c.p.Archived {
 		q += "&archived=false"
 	}
-	auth := func(r *http.Request) { r.Header.Set("PRIVATE-TOKEN", c.token) }
 	var out []Remote
 	for page := "1"; page != ""; {
 		var items []struct {
@@ -205,7 +245,7 @@ func (c *apiClient) gitlab(ctx context.Context) ([]Remote, error) {
 			Branch      string    `json:"default_branch"`
 			Archived    bool      `json:"archived"`
 		}
-		h, err := c.get(ctx, base+"/api/v4/projects?"+q+"&page="+page, auth, &items)
+		h, err := c.get(ctx, base+"/api/v4/projects?"+q+"&page="+page, &items)
 		if err != nil {
 			return nil, err
 		}
@@ -239,9 +279,6 @@ func bbClone(links []bbLink) (ssh, https string) {
 }
 
 func (c *apiClient) bitbucketCloud(ctx context.Context) ([]Remote, error) {
-	if c.p.Username == "" {
-		return nil, fmt.Errorf("bitbucket.org needs username (Atlassian email for API tokens)")
-	}
 	base := c.p.URL
 	if base == "" {
 		base = "https://api.bitbucket.org"
@@ -266,7 +303,7 @@ func (c *apiClient) bitbucketCloud(ctx context.Context) ([]Remote, error) {
 				} `json:"links"`
 			} `json:"values"`
 		}
-		if _, err := c.get(ctx, next, c.basic(c.p.Username), &page); err != nil {
+		if _, err := c.get(ctx, next, &page); err != nil {
 			return nil, err
 		}
 		for _, r := range page.Values {
@@ -291,10 +328,6 @@ func (c *apiClient) bitbucketServer(ctx context.Context) ([]Remote, error) {
 	if base == "" {
 		base = "https://" + c.p.Host
 	}
-	auth := c.bearer
-	if c.p.Username != "" {
-		auth = c.basic(c.p.Username)
-	}
 	var out []Remote
 	for start, last := 0, false; !last; {
 		var page struct {
@@ -314,7 +347,7 @@ func (c *apiClient) bitbucketServer(ctx context.Context) ([]Remote, error) {
 				} `json:"links"`
 			} `json:"values"`
 		}
-		if _, err := c.get(ctx, base+"/rest/api/1.0/repos?limit=500&start="+strconv.Itoa(start), auth, &page); err != nil {
+		if _, err := c.get(ctx, base+"/rest/api/1.0/repos?limit=500&start="+strconv.Itoa(start), &page); err != nil {
 			return nil, err
 		}
 		for _, r := range page.Values {
@@ -350,7 +383,7 @@ func (c *apiClient) azure(ctx context.Context) ([]Remote, error) {
 		} `json:"value"`
 	}
 	// 5.0 is understood by Azure DevOps Server 2019+ and the cloud service.
-	if _, err := c.get(ctx, c.p.URL+"/_apis/git/repositories?api-version=5.0", c.basic(c.p.Username), &resp); err != nil {
+	if _, err := c.get(ctx, c.p.URL+"/_apis/git/repositories?api-version=5.0", &resp); err != nil {
 		return nil, err
 	}
 	var out []Remote
@@ -406,7 +439,7 @@ func loadRemotes(cfg *Config, refresh bool) []Remote {
 		wg.Add(1)
 		go func(i int, p ProviderConfig, stale cacheEntry, hasStale bool) {
 			defer wg.Done()
-			rs, err := p.list(ctx)
+			rs, _, err := p.list(ctx)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {

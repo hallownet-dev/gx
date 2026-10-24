@@ -458,13 +458,17 @@ func cmdDoctor(args []string) error {
 			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 			defer cancel()
 			start := time.Now()
-			rs, err := p.list(ctx)
+			rs, method, err := p.list(ctx)
 			if err != nil {
-				results[i] = red("✗") + " " + p.Label() + ": " + err.Error()
+				via := ""
+				if method != "" {
+					via = " (auth " + method + ")"
+				}
+				results[i] = red("✗") + " " + p.Label() + via + ": " + err.Error()
 				return
 			}
-			results[i] = fmt.Sprintf("%s %s: %d repositories (%s, %s)", green("✓"), p.Label(), len(rs), p.Protocol,
-				time.Since(start).Round(10*time.Millisecond))
+			results[i] = fmt.Sprintf("%s %s: %d repositories (auth %s, clone %s, %s)", green("✓"), p.Label(), len(rs),
+				method, p.Protocol, time.Since(start).Round(10*time.Millisecond))
 		}(i, p)
 	}
 	wg.Wait()

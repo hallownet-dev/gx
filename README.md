@@ -74,29 +74,47 @@ owners = ["hallownet-dev"]  # optional filter
 name = "client-gitlab"
 type = "gitlab"
 host = "gitlab.client.com"
-token_env = "CLIENT_GITLAB_TOKEN"
+auth = "ssh"                    # token minted with your SSH key
 
 [[provider]]
 name = "client-azure"
 type = "azure"
 url = "https://devops.client.com/tfs/DefaultCollection"
-token_cmd = "pass show client/azure-pat"
-protocol = "https"
+protocol = "https"              # no token: uses Git Credential Manager
 
 [[provider]]
 type = "bitbucket"
 host = "bitbucket.client.com"   # bitbucket.org = cloud, anything else = Server/DC
-token_env = "BB_TOKEN"          # HTTP access token (Bearer); set username for basic auth
+token_env = "BB_TOKEN"          # or omit to use the git credential helper
 ```
 
-Tokens come from `token`, `token_env` or `token_cmd`; keep secrets out of the file by using the latter two. `gx doctor` checks every provider.
+### Authentication
+
+You usually don't need to create tokens. Without `token`, `token_env` or `token_cmd`, gx reuses logins you already have, trying in order:
+
+| provider | tried automatically |
+|---|---|
+| GitHub | `gh auth token` → git credential helper |
+| GitLab | `glab` → git credential helper |
+| Azure DevOps | git credential helper → `az account get-access-token` (dev.azure.com only) |
+| Bitbucket | git credential helper |
+
+**git credential helper** means whatever git itself uses for HTTPS: Git Credential Manager, macOS Keychain, libsecret, `pass`… If you have cloned from a host over HTTPS once, gx can list its repos. Prompts are disabled, so a missing credential fails fast instead of hanging.
+
+Pin a method with `auth = "token" | "gh" | "glab" | "az" | "git-credential"`.
+
+**GitLab over SSH:** `auth = "ssh"` creates a 7-day `read_api` token with your SSH key (`ssh git@host personal_access_token gx-<machine> read_api <date>`, GitLab 14.2+), caches it in the user cache dir (`0600`) and renews it a day before expiry or when revoked. Set `ssh = "ssh://git@host:2222"` if SSH isn't `git@<host>:22`. The tokens show up in GitLab under *Access tokens* as `gx-<machine>`.
+
+`gx doctor` shows which method each provider used, or why each one failed.
+
+If you do use tokens, keep them out of the file with `token_env` or `token_cmd`:
 
 | provider | token scope |
 |---|---|
 | GitHub | `repo`, `read:org` |
 | GitLab | `read_api` |
-| Bitbucket Cloud | API token / app password with *Repositories: Read*; `username` = Atlassian email or username |
-| Bitbucket Server/DC | HTTP access token with repository read |
+| Bitbucket Cloud | API token / app password with *Repositories: Read*, plus `username` (Atlassian email or username) |
+| Bitbucket Server/DC | HTTP access token with repository read (`username` optional) |
 | Azure DevOps | PAT with *Code (Read)* |
 
 ## Path rules
