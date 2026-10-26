@@ -36,7 +36,7 @@ go vet ./... && go test ./... && go build -o gx .
 
 Tests isolate git via `GIT_CONFIG_GLOBAL`/`XDG_*` and use fake credential helpers, an `httptest` server and a fake `ssh` on PATH. Never run tests or `gx doctor` against real GitLab with `auth = "ssh"` without the owner's OK: it creates real tokens. The TUI can be smoke-tested through a pty (Python `pty.fork`, send `\r` / `\x1b`).
 
-CI (`.github/workflows/ci.yml`) runs on Linux, macOS and Windows; shell-script-based tests skip on Windows. Tagging `v*` triggers GoReleaser.
+CI (`.github/workflows/ci.yml`) runs on Linux, macOS and Windows; shell-script-based tests skip on Windows. Releases: `.github/workflows/release.yml` runs release-please on every push to `main` (conventional commits → release PR with version bump + `CHANGELOG.md`); merging it tags `vX.Y.Z` and GoReleaser in the same workflow attaches plain linux/windows amd64/arm64 binaries. Don't tag by hand. Commit messages must be conventional (`feat:`, `fix:`, `chore:` …) or they're left out of the changelog.
 
 ## Verified vs. not yet verified
 

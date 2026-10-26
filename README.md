@@ -18,11 +18,14 @@ The same URL always maps to the same path, on every machine and OS.
 ## Install
 
 ```sh
-# needs GOPRIVATE while the repo is private
-GOPRIVATE=github.com/hallownet-dev go install github.com/hallownet-dev/gx@latest
+# needs GOPRIVATE while the repo is private; `go env -w` works in any shell (bash, zsh, fish, pwsh)
+go env -w GOPRIVATE=github.com/hallownet-dev
+go install github.com/hallownet-dev/gx@latest
 ```
 
-or download a binary from Releases (built by GoReleaser on every `v*` tag).
+For a one-off without changing your Go config: `GOPRIVATE=github.com/hallownet-dev go install …` in bash/zsh, or `$env:GOPRIVATE = "github.com/hallownet-dev"; go install …` in PowerShell.
+
+Or download a binary from [Releases](https://github.com/hallownet-dev/gx/releases) (Linux and Windows, amd64/arm64), rename it to `gx` / `gx.exe` and put it on your PATH. `checksums.txt` lists the SHA-256 of each.
 
 Then enable shell integration so `gx l`, `gx j` and `gx cl` can change your directory:
 
@@ -133,3 +136,12 @@ If you do use tokens, keep them out of the file with `token_env` or `token_cmd`:
 go test ./...
 go build -o gx .
 ```
+
+## Releasing
+
+Versions follow [semver](https://semver.org) and are driven by [Conventional Commits](https://www.conventionalcommits.org) on `main`, via [release-please](https://github.com/googleapis/release-please):
+
+- `fix: …` → patch, `feat: …` → minor, `feat!: …` or a `BREAKING CHANGE:` footer → major (while on 0.x, breaking changes bump the minor instead). `chore:`, `docs:`, `ci:`, `test:`, `refactor:` don't release.
+- Every push to `main` updates an open **release PR** that bumps the version and adds the new section to `CHANGELOG.md`.
+- Merging that PR tags `vX.Y.Z`, creates the GitHub release with the changelog as notes, and GoReleaser attaches the binaries.
+- To force a specific version, add a `Release-As: 1.2.3` footer to a commit.

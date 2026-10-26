@@ -1,15 +1,18 @@
 version: 2
 builds:
   - env: [CGO_ENABLED=0]
-    goos: [linux, darwin, windows]
+    goos: [linux, windows]
     goarch: [amd64, arm64]
     ldflags: ["-s -w -X main.version={{.Version}}"]
+# Plain binaries, no tar/zip: gx_<version>_<os>_<arch>[.exe]
 archives:
-  - formats: [tar.gz]
-    format_overrides:
-      - goos: windows
-        formats: [zip]
+  - formats: [binary]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 checksum:
   name_template: checksums.txt
+# release-please creates the GitHub release with the CHANGELOG.md section as
+# notes; GoReleaser only attaches the binaries to it.
 changelog:
-  sort: asc
+  disable: true
+release:
+  mode: keep-existing
