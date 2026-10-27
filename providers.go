@@ -80,6 +80,9 @@ func (p ProviderConfig) listWith(ctx context.Context, cred credential) ([]Remote
 		}
 		return c.bitbucketServer(ctx)
 	case "azure":
+		if cred.Method == "az-devops" {
+			return c.azureCLI(ctx)
+		}
 		return c.azure(ctx)
 	}
 	return nil, fmt.Errorf("unknown provider type %q", p.Type)
@@ -367,34 +370,54 @@ func (c *apiClient) bitbucketServer(ctx context.Context) ([]Remote, error) {
 	return out, nil
 }
 
+// azureRepo is a repository as returned by both the REST API and `az repos list`.
+type azureRepo struct {
+	Name     string `json:"name"`
+	Remote   string `json:"remoteUrl"`
+	SSH      string `json:"sshUrl"`
+	Web      string `json:"webUrl"`
+	Branch   string `json:"defaultBranch"`
+	Disabled bool   `json:"isDisabled"`
+	Project  struct {
+		Name       string `json:"name"`
+		Visibility string `json:"visibility"`
+	} `json:"project"`
+}
+
 func (c *apiClient) azure(ctx context.Context) ([]Remote, error) {
 	var resp struct {
-		Value []struct {
-			Name     string `json:"name"`
-			Remote   string `json:"remoteUrl"`
-			SSH      string `json:"sshUrl"`
-			Web      string `json:"webUrl"`
-			Branch   string `json:"defaultBranch"`
-			Disabled bool   `json:"isDisabled"`
-			Project  struct {
-				Name       string `json:"name"`
-				Visibility string `json:"visibility"`
-			} `json:"project"`
-		} `json:"value"`
+		Value []azureRepo `json:"value"`
 	}
 	// 5.0 is understood by Azure DevOps Server 2019+ and the cloud service.
 	if _, err := c.get(ctx, c.p.URL+"/_apis/git/repositories?api-version=5.0", &resp); err != nil {
 		return nil, err
 	}
+	return c.azureRemotes(resp.Value), nil
+}
+
+// azureCLI lists through `az repos list`, reusing the `az devops login` session.
+func (c *apiClient) azureCLI(ctx context.Context) ([]Remote, error) {
+	out, err := cmdOutput(ctx, nil, "az", "repos", "list", "--organization", c.p.URL, "--detect", "false", "-o", "json")
+	if err != nil {
+		return nil, fmt.Errorf("az repos list: %w", err)
+	}
+	var repos []azureRepo
+	if err := json.Unmarshal([]byte(out), &repos); err != nil {
+		return nil, fmt.Errorf("az repos list: %w", err)
+	}
+	return c.azureRemotes(repos), nil
+}
+
+func (c *apiClient) azureRemotes(repos []azureRepo) []Remote {
 	var out []Remote
-	for _, r := range resp.Value {
+	for _, r := range repos {
 		if r.Disabled || !c.ownerOK(r.Project.Name) {
 			continue
 		}
 		out = append(out, Remote{Name: r.Project.Name + "/" + r.Name, SSH: r.SSH, HTTPS: r.Remote, Web: r.Web,
 			Branch: strings.TrimPrefix(r.Branch, "refs/heads/"), Private: r.Project.Visibility != "public"})
 	}
-	return out, nil
+	return out
 }
 
 // ---- cache ----

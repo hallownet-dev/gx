@@ -104,7 +104,9 @@ You usually don't need to create tokens. Without `token`, `token_env` or `token_
 
 **git credential helper** means whatever git itself uses for HTTPS: Git Credential Manager, macOS Keychain, libsecret, `pass`… If you have cloned from a host over HTTPS once, gx can list its repos. Prompts are disabled, so a missing credential fails fast instead of hanging.
 
-Pin a method with `auth = "token" | "gh" | "glab" | "az" | "git-credential"`.
+Pin a method with `auth = "token" | "gh" | "glab" | "az" | "az-devops" | "git-credential"`.
+
+**Azure DevOps CLI:** `auth = "az-devops"` lists repos with `az repos list --organization <url>`, so the session from `az devops login` is reused (cloud and Server). It's never tried automatically. Several organizations or collections on one server = one `[[provider]]` per `url`.
 
 **GitLab over SSH:** `auth = "ssh"` creates a 7-day `read_api` token with your SSH key (`ssh git@host personal_access_token gx-<machine> read_api <date>`, GitLab 14.2+), caches it in the user cache dir (`0600`) and renews it a day before expiry or when revoked. Set `ssh = "ssh://git@host:2222"` if SSH isn't `git@<host>:22`. The tokens show up in GitLab under *Access tokens* as `gx-<machine>`.
 

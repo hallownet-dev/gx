@@ -22,7 +22,7 @@ import (
 type credential struct {
 	User   string
 	Secret string
-	Method string // token | gh | glab | az | git-credential | ssh
+	Method string // token | gh | glab | az | az-devops | git-credential | ssh
 }
 
 // authModes lists the explicit `auth` values each provider type accepts.
@@ -30,7 +30,7 @@ var authModes = map[string][]string{
 	"github":    {"token", "gh", "git-credential"},
 	"gitlab":    {"token", "glab", "git-credential", "ssh"},
 	"bitbucket": {"token", "git-credential"},
-	"azure":     {"token", "az", "git-credential"},
+	"azure":     {"token", "az", "az-devops", "git-credential"},
 }
 
 // Azure DevOps application ID, the resource to request Entra ID tokens for.
@@ -83,6 +83,9 @@ func (p ProviderConfig) credentialVia(ctx context.Context, mode string, renew bo
 	case "az":
 		c.Secret, err = cmdOutput(ctx, nil, "az", "account", "get-access-token",
 			"--resource", azureDevOpsResource, "--query", "accessToken", "-o", "tsv")
+	case "az-devops":
+		// No token: the listing itself goes through `az repos list`.
+		return c, nil
 	case "git-credential":
 		var user string
 		user, c.Secret, err = gitCredential(ctx, p.credentialURL())

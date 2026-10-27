@@ -141,6 +141,33 @@ func TestGitLabSSHToken(t *testing.T) {
 	}
 }
 
+func TestAzDevopsList(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script")
+	}
+	bin := t.TempDir()
+	calls := filepath.Join(bin, "calls")
+	script := "#!/bin/sh\necho \"$@\" > " + calls + "\n" + `cat <<'EOF'
+[{"name":"api","remoteUrl":"https://devops.client.com/tfs/CollA/Shop/_git/api","sshUrl":"ssh://devops.client.com:22/tfs/CollA/Shop/_git/api","defaultBranch":"refs/heads/main","project":{"name":"Shop","visibility":"private"}},
+ {"name":"old","isDisabled":true,"project":{"name":"Shop"}},
+ {"name":"x","project":{"name":"Other"}}]
+EOF
+`
+	if err := os.WriteFile(filepath.Join(bin, "az"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	p := ProviderConfig{Type: "azure", URL: "https://devops.client.com/tfs/CollA", Auth: "az-devops", Owners: []string{"Shop"}}
+	rs, method, err := p.list(context.Background())
+	if err != nil || method != "az-devops" || len(rs) != 1 || rs[0].Name != "Shop/api" || rs[0].Branch != "main" {
+		t.Fatalf("got %+v %q %v", rs, method, err)
+	}
+	if b, _ := os.ReadFile(calls); !strings.Contains(string(b), "repos list --organization https://devops.client.com/tfs/CollA") {
+		t.Fatalf("unexpected az args: %s", b)
+	}
+}
+
 func TestValidAuth(t *testing.T) {
 	bad := []ProviderConfig{
 		{Type: "github", Auth: "ssh"},

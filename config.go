@@ -32,7 +32,7 @@ type ProviderConfig struct {
 	Token    string   `toml:"token"`
 	TokenEnv string   `toml:"token_env"`
 	TokenCmd string   `toml:"token_cmd"`
-	Auth     string   `toml:"auth"` // token | gh | glab | az | git-credential | ssh; empty = automatic
+	Auth     string   `toml:"auth"` // token | gh | glab | az | az-devops | git-credential | ssh; empty = automatic
 	SSH      string   `toml:"ssh"`  // GitLab auth = "ssh": destination, default git@<host>
 	Protocol string   `toml:"protocol"`
 	Insecure bool     `toml:"insecure"`
@@ -72,6 +72,8 @@ cache_ttl = "15m"             # how long "gx l" reuses the remote repo list
 # "git credential helper" = whatever git uses for HTTPS (Git Credential
 # Manager, keychain, libsecret…), so cloning once over HTTPS is enough.
 # Force one method with auth = "token" | "gh" | "glab" | "az" | "git-credential".
+# Azure only: auth = "az-devops" lists via "az repos list" with your
+# "az devops login" session (works for Azure DevOps Server too).
 # GitLab only: auth = "ssh" creates a 7-day read_api token with your SSH key
 # (ssh git@host personal_access_token …, GitLab 14.2+) and renews it.
 
