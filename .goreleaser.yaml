@@ -10,9 +10,3 @@ archives:
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 checksum:
   name_template: checksums.txt
-# release-please creates the GitHub release with the CHANGELOG.md section as
-# notes; GoReleaser only attaches the binaries to it.
-changelog:
-  disable: true
-release:
-  mode: keep-existing

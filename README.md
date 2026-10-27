@@ -141,9 +141,12 @@ go build -o gx .
 
 ## Releasing
 
-Versions follow [semver](https://semver.org) and are driven by [Conventional Commits](https://www.conventionalcommits.org) on `main`, via [release-please](https://github.com/googleapis/release-please):
+Work happens on branches. A PR runs vet, test and build on Linux, macOS and Windows; after merge the same runs again on `main`.
 
-- `fix: …` → patch, `feat: …` → minor, `feat!: …` or a `BREAKING CHANGE:` footer → major (while on 0.x, breaking changes bump the minor instead). `chore:`, `docs:`, `ci:`, `test:`, `refactor:` don't release.
-- Every push to `main` updates an open **release PR** that bumps the version and adds the new section to `CHANGELOG.md`.
-- Merging that PR tags `vX.Y.Z`, creates the GitHub release with the changelog as notes, and GoReleaser attaches the binaries.
-- To force a specific version, add a `Release-As: 1.2.3` footer to a commit.
+To publish binaries, tag a commit on `main` with a [semver](https://semver.org) version and push the tag:
+
+```sh
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+GoReleaser then creates the GitHub release with the binaries and a commit list as notes.
