@@ -106,7 +106,7 @@ You usually don't need to create tokens. Without `token`, `token_env` or `token_
 
 Pin a method with `auth = "token" | "gh" | "glab" | "az" | "az-devops" | "git-credential"`.
 
-**Azure DevOps CLI:** `auth = "az-devops"` lists repos with `az repos list --organization <url>`, so the session from `az devops login` is reused (cloud and Server). It's never tried automatically. Several organizations or collections on one server = one `[[provider]]` per `url`.
+**Azure DevOps CLI:** `auth = "az-devops"` lists repos of all projects with `az devops invoke --organization <url> --area git --resource repositories`, so the session from `az devops login` is reused (cloud and Server). It's never tried automatically. `url` is the organization or collection URL, e.g. `https://devops.client.com/tfs/CollectionA`; several of them = one `[[provider]]` per `url`.
 
 **GitLab over SSH:** `auth = "ssh"` creates a 7-day `read_api` token with your SSH key (`ssh git@host personal_access_token gx-<machine> read_api <date>`, GitLab 14.2+), caches it in the user cache dir (`0600`) and renews it a day before expiry or when revoked. Set `ssh = "ssh://git@host:2222"` if SSH isn't `git@<host>:22`. The tokens show up in GitLab under *Access tokens* as `gx-<machine>`.
 

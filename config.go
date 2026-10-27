@@ -72,7 +72,7 @@ cache_ttl = "15m"             # how long "gx l" reuses the remote repo list
 # "git credential helper" = whatever git uses for HTTPS (Git Credential
 # Manager, keychain, libsecret…), so cloning once over HTTPS is enough.
 # Force one method with auth = "token" | "gh" | "glab" | "az" | "git-credential".
-# Azure only: auth = "az-devops" lists via "az repos list" with your
+# Azure only: auth = "az-devops" lists via "az devops invoke" with your
 # "az devops login" session (works for Azure DevOps Server too).
 # GitLab only: auth = "ssh" creates a 7-day read_api token with your SSH key
 # (ssh git@host personal_access_token …, GitLab 14.2+) and renews it.

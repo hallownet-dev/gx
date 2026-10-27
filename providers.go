@@ -370,7 +370,7 @@ func (c *apiClient) bitbucketServer(ctx context.Context) ([]Remote, error) {
 	return out, nil
 }
 
-// azureRepo is a repository as returned by both the REST API and `az repos list`.
+// azureRepo is a repository as returned by the REST API.
 type azureRepo struct {
 	Name     string `json:"name"`
 	Remote   string `json:"remoteUrl"`
@@ -395,17 +395,21 @@ func (c *apiClient) azure(ctx context.Context) ([]Remote, error) {
 	return c.azureRemotes(resp.Value), nil
 }
 
-// azureCLI lists through `az repos list`, reusing the `az devops login` session.
+// azureCLI makes the same REST call through `az devops invoke`, reusing the
+// `az devops login` session. Unlike `az repos list` it needs no --project.
 func (c *apiClient) azureCLI(ctx context.Context) ([]Remote, error) {
-	out, err := cmdOutput(ctx, nil, "az", "repos", "list", "--organization", c.p.URL, "--detect", "false", "-o", "json")
+	out, err := cmdOutput(ctx, nil, "az", "devops", "invoke", "--organization", c.p.URL,
+		"--area", "git", "--resource", "repositories", "--api-version", "5.0", "-o", "json")
 	if err != nil {
-		return nil, fmt.Errorf("az repos list: %w", err)
+		return nil, fmt.Errorf("az devops invoke: %w", err)
 	}
-	var repos []azureRepo
-	if err := json.Unmarshal([]byte(out), &repos); err != nil {
-		return nil, fmt.Errorf("az repos list: %w", err)
+	var resp struct {
+		Value []azureRepo `json:"value"`
 	}
-	return c.azureRemotes(repos), nil
+	if err := json.Unmarshal([]byte(out), &resp); err != nil {
+		return nil, fmt.Errorf("az devops invoke: %w", err)
+	}
+	return c.azureRemotes(resp.Value), nil
 }
 
 func (c *apiClient) azureRemotes(repos []azureRepo) []Remote {
