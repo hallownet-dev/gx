@@ -168,6 +168,16 @@ EOF
 	}
 }
 
+func TestCmdOutputSkipsWarnings(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script")
+	}
+	_, err := cmdOutput(context.Background(), nil, "sh", "-c", "echo 'WARNING: meh' >&2; echo 'ERROR: login' >&2; exit 1")
+	if err == nil || err.Error() != "ERROR: login" {
+		t.Fatalf("got %v", err)
+	}
+}
+
 func TestValidAuth(t *testing.T) {
 	bad := []ProviderConfig{
 		{Type: "github", Auth: "ssh"},

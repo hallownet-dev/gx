@@ -147,6 +147,13 @@ func cmdOutput(ctx context.Context, env []string, name string, args ...string) (
 	}
 	if err != nil {
 		msg, _, _ := strings.Cut(strings.TrimSpace(stderr.String()), "\n")
+		// az prints warnings before the actual error.
+		for _, line := range strings.Split(stderr.String(), "\n") {
+			if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "WARNING:") {
+				msg = line
+				break
+			}
+		}
 		if msg == "" {
 			msg = err.Error()
 		}
