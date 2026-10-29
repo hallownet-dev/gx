@@ -22,8 +22,8 @@ func TestParseRepoURL(t *testing.T) {
 
 		// GitLab with nested groups
 		{"git@gitlab.com:group/sub/subsub/repo.git", "gitlab.com/group/sub/subsub/repo", false},
-		{"https://gitlab.company.com/group/sub/repo/-/tree/main", "gitlab.company.com/group/sub/repo", true},
-		{"ssh://git@gitlab.company.com:2222/group/repo.git", "gitlab.company.com/group/repo", false},
+		{"https://gitlab.example.org/group/sub/repo/-/tree/main", "gitlab.example.org/group/sub/repo", true},
+		{"ssh://git@gitlab.example.org:2222/group/repo.git", "gitlab.example.org/group/repo", false},
 
 		// Azure DevOps cloud
 		{"https://dev.azure.com/org/proj/_git/repo", "dev.azure.com/org/proj/repo", false},
@@ -34,9 +34,9 @@ func TestParseRepoURL(t *testing.T) {
 		{"https://dev.azure.com/org/proj/_git/repo?path=/README.md", "dev.azure.com/org/proj/repo", false},
 
 		// Azure DevOps Server (self-hosted)
-		{"https://devops.client.com/tfs/DefaultCollection/Proj/_git/Repo", "devops.client.com/DefaultCollection/Proj/Repo", false},
-		{"ssh://devops.client.com:22/tfs/DefaultCollection/Proj/_git/Repo", "devops.client.com/DefaultCollection/Proj/Repo", false},
-		{"https://devops.client.com/Coll/My%20Project/_git/Repo", "devops.client.com/Coll/My Project/Repo", false},
+		{"https://devops.example.com/tfs/DefaultCollection/Proj/_git/Repo", "devops.example.com/DefaultCollection/Proj/Repo", false},
+		{"ssh://devops.example.com:22/tfs/DefaultCollection/Proj/_git/Repo", "devops.example.com/DefaultCollection/Proj/Repo", false},
+		{"https://devops.example.com/Coll/My%20Project/_git/Repo", "devops.example.com/Coll/My Project/Repo", false},
 
 		// Bitbucket cloud
 		{"https://bitbucket.org/ws/repo.git", "bitbucket.org/ws/repo", false},
@@ -44,10 +44,10 @@ func TestParseRepoURL(t *testing.T) {
 		{"https://user@bitbucket.org/ws/repo/src/main/", "bitbucket.org/ws/repo", true},
 
 		// Bitbucket Server / Data Center
-		{"https://user@bitbucket.client.com/scm/proj/repo.git", "bitbucket.client.com/proj/repo", false},
-		{"ssh://git@bitbucket.client.com:7999/proj/repo.git", "bitbucket.client.com/proj/repo", false},
-		{"https://bitbucket.client.com/bitbucket/scm/proj/repo.git", "bitbucket.client.com/proj/repo", false},
-		{"https://bitbucket.client.com/scm/~jdoe/repo.git", "bitbucket.client.com/~jdoe/repo", false},
+		{"https://user@bitbucket.example.com/scm/proj/repo.git", "bitbucket.example.com/proj/repo", false},
+		{"ssh://git@bitbucket.example.com:7999/proj/repo.git", "bitbucket.example.com/proj/repo", false},
+		{"https://bitbucket.example.com/bitbucket/scm/proj/repo.git", "bitbucket.example.com/proj/repo", false},
+		{"https://bitbucket.example.com/scm/~jdoe/repo.git", "bitbucket.example.com/~jdoe/repo", false},
 	}
 	for _, c := range cases {
 		u, err := ParseRepoURL(c.in, "github.com")
@@ -80,7 +80,7 @@ func TestCloneURL(t *testing.T) {
 	if got := u.CloneURL("https"); got != "https://github.com/hallownet-dev/gx.git" {
 		t.Errorf("https: %s", got)
 	}
-	raw := "https://devops.client.com/tfs/Coll/Proj/_git/Repo"
+	raw := "https://devops.example.com/tfs/Coll/Proj/_git/Repo"
 	u, _ = ParseRepoURL(raw, "github.com")
 	if got := u.CloneURL("ssh"); got != raw {
 		t.Errorf("cloneable URL should be kept as is, got %s", got)
@@ -93,7 +93,7 @@ func TestWebURL(t *testing.T) {
 		"https://user@bitbucket.org/ws/repo.git":            "https://bitbucket.org/ws/repo",
 		"git@ssh.dev.azure.com:v3/org/proj/repo":            "https://dev.azure.com/org/proj/_git/repo",
 		"https://org@dev.azure.com/org/proj/_git/repo":      "https://dev.azure.com/org/proj/_git/repo",
-		"ssh://git@gitlab.company.com:2222/group/sub/r.git": "https://gitlab.company.com/group/sub/r",
+		"ssh://git@gitlab.example.org:2222/group/sub/r.git": "https://gitlab.example.org/group/sub/r",
 	}
 	for in, want := range cases {
 		if got := WebURL(in); got != want {

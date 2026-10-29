@@ -56,7 +56,7 @@ const sampleConfig = `# gx configuration
 # Repositories are cloned to <root>/<host>/<full path>, e.g.
 #   ~/Projects/github.com/org/repo
 #   ~/Projects/gitlab.com/group/subgroup/repo
-#   ~/Projects/devops.client.com/Collection/Project/repo
+#   ~/Projects/devops.example.com/Collection/Project/repo
 
 root = "~/Projects"
 default_host = "github.com"   # used for shorthands like "gx cl org/repo"
@@ -83,18 +83,18 @@ host = "github.com"
 # owners = ["hallownet-dev"]  # only list repos of these users/orgs
 
 # [[provider]]
-# name = "client-gitlab"
+# name = "work-gitlab"
 # type = "gitlab"
-# host = "gitlab.client.com"
-# auth = "ssh"                 # or token_env = "CLIENT_GITLAB_TOKEN"
-# ssh = "ssh://git@gitlab.client.com:2222"   # only if SSH is not git@<host>:22
+# host = "gitlab.example.com"
+# auth = "ssh"                 # or token_env = "WORK_GITLAB_TOKEN"
+# ssh = "ssh://git@gitlab.example.com:2222"   # only if SSH is not git@<host>:22
 # owners = ["team/subgroup"]   # path prefixes
 
 # [[provider]]
-# name = "client-azure"
+# name = "work-azure"
 # type = "azure"
-# url = "https://devops.client.com/tfs/DefaultCollection"  # or https://dev.azure.com/<org>
-# (no token: uses Git Credential Manager; or token_cmd = "pass show client/azure-pat")
+# url = "https://devops.example.com/tfs/DefaultCollection"  # or https://dev.azure.com/<org>
+# (no token: uses Git Credential Manager; or token_cmd = "pass show work/azure-pat")
 # protocol = "https"
 # owners = ["ProjectA"]        # project names
 

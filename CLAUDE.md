@@ -4,7 +4,7 @@ Single-binary git companion: fuzzy-browse repos on GitHub, GitLab, Bitbucket (Cl
 
 ## Why it exists
 
-The owner switches machines and OSes often and works for clients on all four providers. Goals: the same repo lives at the same path on every machine (this also keeps Claude Code's per-path memory/history aligned), no heavy TUI (lazygit was rejected as slow and clumsy), and as few hand-managed tokens as possible.
+The owner switches machines and OSes often and works with all four providers. Goals: the same repo lives at the same path on every machine (this also keeps Claude Code's per-path memory/history aligned), no heavy TUI (lazygit was rejected as slow and clumsy), and as few hand-managed tokens as possible.
 
 ## Layout
 
@@ -36,7 +36,7 @@ go vet ./... && go test ./... && go build -o gx .
 
 Tests isolate git via `GIT_CONFIG_GLOBAL`/`XDG_*` and use fake credential helpers, an `httptest` server and a fake `ssh` on PATH. Never run tests or `gx doctor` against real GitLab with `auth = "ssh"` without the owner's OK: it creates real tokens. The TUI can be smoke-tested through a pty (Python `pty.fork`, send `\r` / `\x1b`).
 
-CI (`.github/workflows/ci.yml`) runs on Linux, macOS and Windows; shell-script-based tests skip on Windows. Flow: branch → PR (ci.yml: vet, test, build) → manual merge → ci.yml again on `main`. Releases: pushing a `vX.Y.Z` tag runs `.github/workflows/release.yml`, where GoReleaser publishes plain linux/windows amd64/arm64 binaries. Commit messages stay conventional (`feat:`, `fix:`, `chore:` …).
+CI (`.github/workflows/ci.yml`) runs on Linux, macOS and Windows; shell-script-based tests skip on Windows. Flow: branch → PR (ci.yml: vet, test, build) → manual merge → ci.yml again on `main`. Releases: pushing a `vX.Y.Z` tag runs `.github/workflows/release.yml`, where GoReleaser publishes plain linux/darwin/windows amd64/arm64 binaries named `gx_<os>_<arch>[.exe]` (no version in the name, so `releases/latest/download/…` URLs in the README stay valid; don't rename them). Commit messages stay conventional (`feat:`, `fix:`, `chore:` …).
 
 ## Verified vs. not yet verified
 
@@ -47,3 +47,4 @@ CI (`.github/workflows/ci.yml`) runs on Linux, macOS and Windows; shell-script-b
 
 - Windows-native tests for the credential helper path.
 - Homebrew tap / scoop manifest via GoReleaser.
+- Signing/notarizing the macOS binaries (currently unsigned; the README's curl install avoids quarantine).

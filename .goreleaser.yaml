@@ -1,12 +1,33 @@
 version: 2
 builds:
   - env: [CGO_ENABLED=0]
-    goos: [linux, windows]
+    goos: [linux, darwin, windows]
     goarch: [amd64, arm64]
     ldflags: ["-s -w -X main.version={{.Version}}"]
-# Plain binaries, no tar/zip: gx_<version>_<os>_<arch>[.exe]
+# Plain binaries, no tar/zip: gx_<os>_<arch>[.exe]. No version in the name, so
+# https://github.com/hallownet-dev/gx/releases/latest/download/gx_<os>_<arch>
+# always points at the newest release.
 archives:
   - formats: [binary]
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
 checksum:
   name_template: checksums.txt
+# Release notes from conventional commits since the previous tag.
+changelog:
+  sort: asc
+  abbrev: 7
+  format: "{{ .Message }} ({{ .SHA }})"
+  filters:
+    exclude: ["^(chore|ci|docs|test|style|build)(\\(.*\\))?:", "^Merge "]
+  groups:
+    - title: Breaking changes
+      regexp: '^\w+(\(.+\))?!:'
+      order: 0
+    - title: Features
+      regexp: '^feat(\(.+\))?:'
+      order: 1
+    - title: Fixes
+      regexp: '^fix(\(.+\))?:'
+      order: 2
+    - title: Other
+      order: 999

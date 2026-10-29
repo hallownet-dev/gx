@@ -40,7 +40,7 @@ func azureServer(t *testing.T, accept func(*http.Request) bool) *httptest.Server
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"value":[{"name":"Repo","remoteUrl":"https://devops.client.com/Coll/Proj/_git/Repo",
+		_, _ = w.Write([]byte(`{"value":[{"name":"Repo","remoteUrl":"https://devops.example.com/Coll/Proj/_git/Repo",
 			"defaultBranch":"refs/heads/main","project":{"name":"Proj"}}]}`))
 	}))
 	t.Cleanup(srv.Close)
@@ -52,7 +52,7 @@ func TestGitCredentialHelper(t *testing.T) {
 		t.Skip("shell helper")
 	}
 	isolateGit(t, fakeHelper)
-	user, secret, err := gitCredential(context.Background(), "https://devops.client.com/tfs/Coll")
+	user, secret, err := gitCredential(context.Background(), "https://devops.example.com/tfs/Coll")
 	if err != nil || user != "alice" || secret != "s3cret" {
 		t.Fatalf("got %q %q %v", user, secret, err)
 	}
@@ -119,7 +119,7 @@ func TestGitLabSSHToken(t *testing.T) {
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	p := ProviderConfig{Type: "gitlab", Host: "gitlab.client.com", SSH: "ssh://git@gitlab.client.com:2222", Auth: "ssh"}
+	p := ProviderConfig{Type: "gitlab", Host: "gitlab.example.com", SSH: "ssh://git@gitlab.example.com:2222", Auth: "ssh"}
 	ctx := context.Background()
 	tok, err := gitlabSSHToken(ctx, p, false)
 	if err != nil || tok != "glpat-1" {
@@ -132,7 +132,7 @@ func TestGitLabSSHToken(t *testing.T) {
 		t.Fatalf("expected renewed token, got %q", tok)
 	}
 	b, _ := os.ReadFile(calls)
-	if !strings.Contains(string(b), "-o BatchMode=yes -p 2222 git@gitlab.client.com personal_access_token gx-") ||
+	if !strings.Contains(string(b), "-o BatchMode=yes -p 2222 git@gitlab.example.com personal_access_token gx-") ||
 		!strings.Contains(string(b), " read_api ") {
 		t.Fatalf("unexpected ssh args: %s", b)
 	}
@@ -148,7 +148,7 @@ func TestAzDevopsList(t *testing.T) {
 	bin := t.TempDir()
 	calls := filepath.Join(bin, "calls")
 	script := "#!/bin/sh\necho \"$@\" > " + calls + "\n" + `cat <<'EOF'
-{"count":3,"value":[{"name":"api","remoteUrl":"https://devops.client.com/tfs/CollA/Shop/_git/api","sshUrl":"ssh://devops.client.com:22/tfs/CollA/Shop/_git/api","defaultBranch":"refs/heads/main","project":{"name":"Shop","visibility":"private"}},
+{"count":3,"value":[{"name":"api","remoteUrl":"https://devops.example.com/tfs/CollA/Shop/_git/api","sshUrl":"ssh://devops.example.com:22/tfs/CollA/Shop/_git/api","defaultBranch":"refs/heads/main","project":{"name":"Shop","visibility":"private"}},
  {"name":"old","isDisabled":true,"project":{"name":"Shop"}},
  {"name":"x","project":{"name":"Other"}}]}
 EOF
@@ -158,12 +158,12 @@ EOF
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	p := ProviderConfig{Type: "azure", URL: "https://devops.client.com/tfs/CollA", Auth: "az-devops", Owners: []string{"Shop"}}
+	p := ProviderConfig{Type: "azure", URL: "https://devops.example.com/tfs/CollA", Auth: "az-devops", Owners: []string{"Shop"}}
 	rs, method, err := p.list(context.Background())
 	if err != nil || method != "az-devops" || len(rs) != 1 || rs[0].Name != "Shop/api" || rs[0].Branch != "main" {
 		t.Fatalf("got %+v %q %v", rs, method, err)
 	}
-	if b, _ := os.ReadFile(calls); !strings.Contains(string(b), "devops invoke --organization https://devops.client.com/tfs/CollA --area git --resource repositories") {
+	if b, _ := os.ReadFile(calls); !strings.Contains(string(b), "devops invoke --organization https://devops.example.com/tfs/CollA --area git --resource repositories") {
 		t.Fatalf("unexpected az args: %s", b)
 	}
 }
