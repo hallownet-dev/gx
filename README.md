@@ -256,3 +256,7 @@ git tag v0.2.0 && git push origin v0.2.0
 ```
 
 GoReleaser then creates the GitHub release with binaries for Linux, macOS and Windows (amd64, arm64) and release notes grouped from [conventional commit](https://www.conventionalcommits.org) messages (`feat:`, `fix:`, `feat!:`; `chore:`, `ci:`, `docs:`, `test:` are left out).
+
+## License
+
+[MIT](LICENSE)
