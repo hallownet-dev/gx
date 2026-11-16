@@ -17,6 +17,7 @@ Flat `package main`, one file per concern:
 - `cmd_config.go`: `setup` (first-run wizard, rerun = start over) and `config` (numbered-menu editor; `path`, `edit`). Line-based `asker` instead of the fuzzy picker so it's testable from a reader.
 - `cmd_repos.go`: `l j cl o ov ls adopt doctor`. `cmd_work.go`: `s a c p b`. `main.go`: dispatch, help, `gx shell`.
 - `git.go`: shells out to the `git` binary (keeps the user's SSH and credential setup); porcelain v2 status parser.
+- `helper.go`: picks and offers a git credential helper per OS when none is set (`chooseHelper` is pure, `probeHelper` asks git).
 - `ui.go`: colors, spinner, fuzzy picker (`ktr0731/go-fuzzyfinder`; no fzf dependency, works on Windows).
 
 ## Conventions and decisions
