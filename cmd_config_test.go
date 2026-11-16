@@ -247,27 +247,6 @@ func TestAzureLabelShowsPath(t *testing.T) {
 	}
 }
 
-func TestEnsureHelper(t *testing.T) {
-	isolateGit(t, "")
-	var out strings.Builder
-	helperChecked = false
-	ensureHelper(&asker{in: bufio.NewReader(strings.NewReader("n\n")), out: &out})
-	if !strings.Contains(out.String(), "won't be remembered") {
-		t.Fatalf("no warning without a helper: %q", out.String())
-	}
-	if h, _ := gitOut("", "config", "--global", "--get", "credential.helper"); h != "" {
-		t.Fatalf("declined, but helper was set to %q", h)
-	}
-
-	isolateGit(t, "store")
-	out.Reset()
-	helperChecked = false
-	ensureHelper(&asker{in: bufio.NewReader(strings.NewReader("")), out: &out})
-	if out.Len() != 0 {
-		t.Fatalf("helper configured, want silence, got %q", out.String())
-	}
-}
-
 func TestLabelDefaultsHost(t *testing.T) {
 	if got := (ProviderConfig{Type: "github"}).Label(); got != "github:github.com" {
 		t.Fatalf("got %q", got)

@@ -226,7 +226,17 @@ Collections on one Azure DevOps Server share a stored credential (git keys it by
 
 Pin a method with `auth = "token" | "gh" | "glab" | "git-credential"`.
 
-**Azure DevOps:** `url` is the organization or collection URL, e.g. `https://dev.azure.com/myorg` or `https://devops.example.com/tfs/CollectionA`; several of them = one `[[provider]]` per `url`. In `gx setup` you can also give just the server (`https://devops.example.com/tfs`, or whatever its virtual directory is): gx lists its collections and adds the ones you pick. If git has no credential helper, setup offers to configure Git Credential Manager, since a sign-in is otherwise forgotten when gx exits.
+**Azure DevOps:** `url` is the organization or collection URL, e.g. `https://dev.azure.com/myorg` or `https://devops.example.com/tfs/CollectionA`; several of them = one `[[provider]]` per `url`. In `gx setup` you can also give just the server (`https://devops.example.com/tfs`, or whatever its virtual directory is): gx lists its collections and adds the ones you pick.
+
+**Remembering sign-ins:** a sign-in is stored by git's credential helper. If none is configured, gx offers (once, before signing in) the best one the machine has, and otherwise warns that the sign-in is forgotten when gx exits:
+
+| OS | offered, in order |
+|---|---|
+| Windows | Git Credential Manager (ships with Git for Windows) |
+| macOS | Git Credential Manager if installed, else the Keychain (`osxkeychain`) |
+| Linux | Git Credential Manager with a store (`secretservice` on a desktop, `gpg` if `pass` is set up, else `cache`), else `libsecret` on a desktop, else `cache --timeout=86400` (memory only, one day) |
+
+On Linux, GCM refuses to work until `credential.credentialStore` is set; gx offers that too when GCM is configured without one.
 
 **GitLab over SSH:** `auth = "ssh"` creates a 7-day `read_api` token with your SSH key (`ssh git@host personal_access_token gx-<machine> read_api <date>`, GitLab 14.2+), caches it in the user cache dir (`0600`) and renews it a day before expiry or when revoked. Set `ssh = "ssh://git@host:2222"` if SSH isn't `git@<host>:22`. The tokens show up in GitLab under *Access tokens* as `gx-<machine>`.
 
