@@ -80,9 +80,6 @@ func (p ProviderConfig) listWith(ctx context.Context, cred credential) ([]Remote
 		}
 		return c.bitbucketServer(ctx)
 	case "azure":
-		if cred.Method == "az-devops" {
-			return c.azureCLI(ctx)
-		}
 		return c.azure(ctx)
 	}
 	return nil, fmt.Errorf("unknown provider type %q", p.Type)
@@ -105,7 +102,7 @@ func newAPIClient(p ProviderConfig, cred credential) *apiClient {
 	bearer := func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+cred.Secret) }
 	basic := func(r *http.Request) { r.SetBasicAuth(cred.User, cred.Secret) }
 	switch {
-	case p.Type == "github", p.Type == "gitlab", cred.Method == "az":
+	case p.Type == "github", p.Type == "gitlab":
 		// PATs and OAuth tokens alike are accepted as Bearer.
 		c.schemes = []func(*http.Request){bearer}
 	case p.Type == "azure", cred.User != "":
@@ -391,23 +388,6 @@ func (c *apiClient) azure(ctx context.Context) ([]Remote, error) {
 	// 5.0 is understood by Azure DevOps Server 2019+ and the cloud service.
 	if _, err := c.get(ctx, c.p.URL+"/_apis/git/repositories?api-version=5.0", &resp); err != nil {
 		return nil, err
-	}
-	return c.azureRemotes(resp.Value), nil
-}
-
-// azureCLI makes the same REST call through `az devops invoke`, reusing the
-// `az devops login` session. Unlike `az repos list` it needs no --project.
-func (c *apiClient) azureCLI(ctx context.Context) ([]Remote, error) {
-	out, err := cmdOutput(ctx, nil, "az", "devops", "invoke", "--organization", c.p.URL,
-		"--area", "git", "--resource", "repositories", "--api-version", "5.0", "-o", "json")
-	if err != nil {
-		return nil, fmt.Errorf("az devops invoke: %w", err)
-	}
-	var resp struct {
-		Value []azureRepo `json:"value"`
-	}
-	if err := json.Unmarshal([]byte(out), &resp); err != nil {
-		return nil, fmt.Errorf("az devops invoke: %w", err)
 	}
 	return c.azureRemotes(resp.Value), nil
 }

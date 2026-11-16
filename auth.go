@@ -22,7 +22,7 @@ import (
 type credential struct {
 	User   string
 	Secret string
-	Method string // token | gh | glab | az | az-devops | git-credential | ssh
+	Method string // token | gh | glab | git-credential | ssh
 }
 
 // authModes lists the explicit `auth` values each provider type accepts.
@@ -30,11 +30,8 @@ var authModes = map[string][]string{
 	"github":    {"token", "gh", "git-credential"},
 	"gitlab":    {"token", "glab", "git-credential", "ssh"},
 	"bitbucket": {"token", "git-credential"},
-	"azure":     {"token", "az", "az-devops", "git-credential"},
+	"azure":     {"token", "git-credential"},
 }
-
-// Azure DevOps application ID, the resource to request Entra ID tokens for.
-const azureDevOpsResource = "499b84ac-1321-427f-aa17-267ca6975798"
 
 // modes returns the auth methods to try, in order. "ssh" is never automatic
 // because it creates a token on the server.
@@ -50,10 +47,6 @@ func (p ProviderConfig) modes() []string {
 		return []string{"gh", "git-credential"}
 	case "gitlab":
 		return []string{"glab", "git-credential"}
-	case "azure":
-		if p.Host == "dev.azure.com" {
-			return []string{"git-credential", "az"}
-		}
 	}
 	return []string{"git-credential"}
 }
@@ -80,12 +73,6 @@ func (p ProviderConfig) credentialVia(ctx context.Context, mode string, renew bo
 		c.Secret, err = cmdOutput(ctx, nil, "gh", "auth", "token", "--hostname", p.Host)
 	case "glab":
 		c.Secret, err = cmdOutput(ctx, nil, "glab", "config", "get", "token", "--host", p.Host)
-	case "az":
-		c.Secret, err = cmdOutput(ctx, nil, "az", "account", "get-access-token",
-			"--resource", azureDevOpsResource, "--query", "accessToken", "-o", "tsv")
-	case "az-devops":
-		// No token: the listing itself goes through `az repos list`.
-		return c, nil
 	case "git-credential":
 		var user string
 		user, c.Secret, err = gitCredential(ctx, p.credentialURL())
@@ -147,13 +134,6 @@ func cmdOutput(ctx context.Context, env []string, name string, args ...string) (
 	}
 	if err != nil {
 		msg, _, _ := strings.Cut(strings.TrimSpace(stderr.String()), "\n")
-		// az prints warnings before the actual error.
-		for _, line := range strings.Split(stderr.String(), "\n") {
-			if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "WARNING:") {
-				msg = line
-				break
-			}
-		}
 		if msg == "" {
 			msg = err.Error()
 		}
@@ -282,6 +262,9 @@ func (p ProviderConfig) sshTarget() (target, port string) {
 func validAuth(p ProviderConfig) error {
 	if p.Auth == "" {
 		return nil
+	}
+	if p.Auth == "az" || p.Auth == "az-devops" {
+		return fmt.Errorf("auth %q was removed; delete the line (gx signs in through git credentials)", p.Auth)
 	}
 	if !slices.Contains(authModes[p.Type], p.Auth) {
 		return fmt.Errorf("auth %q is not supported for %s (use %s)", p.Auth, p.Type, strings.Join(authModes[p.Type], ", "))

@@ -11,7 +11,7 @@ The owner switches machines and OSes often and works with all four providers. Go
 Flat `package main`, one file per concern:
 
 - `repourl.go`: URL → `RepoURL{Host, Path}`. **The core invariant: every URL form of a repo (ssh, scp-like, https, browser URL, shorthand) maps to the same path.** Any change here needs a case in `repourl_test.go`.
-- `auth.go`: credential resolution (token / gh / glab / az / git-credential / GitLab-over-ssh minting) with ordered fallback.
+- `auth.go`: credential resolution (token / gh / glab / git-credential / GitLab-over-ssh minting) with ordered fallback.
 - `providers.go`: per-provider API listing, Basic→Bearer retry on 401, remote list cache.
 - `config.go`: TOML config at `~/.config/gx/config.toml` on every OS (deliberately not `os.UserConfigDir`, so dotfiles sync works the same everywhere).
 - `cmd_repos.go`: `l j cl o ov ls adopt doctor`. `cmd_work.go`: `s a c p b`. `main.go`: dispatch, help, `gx shell`.
@@ -41,7 +41,7 @@ CI (`.github/workflows/ci.yml`) runs on Linux, macOS and Windows; shell-script-b
 ## Verified vs. not yet verified
 
 - Verified for real: GitHub listing via `gh` (100+ repos, pagination), all git subcommands, picker, `ov`, `adopt -n`.
-- Unit-tested only, never run against a real server: GitLab, Bitbucket Cloud/Server, Azure DevOps APIs; `az` auth; GitLab SSH token minting.
+- Unit-tested only, never run against a real server: GitLab, Bitbucket Cloud/Server, Azure DevOps APIs; GitLab SSH token minting.
 
 ## Open ideas
 
