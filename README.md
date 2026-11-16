@@ -226,7 +226,7 @@ Collections on one Azure DevOps Server share a stored credential (git keys it by
 
 Pin a method with `auth = "token" | "gh" | "glab" | "git-credential"`.
 
-**Azure DevOps:** `url` is the organization or collection URL, e.g. `https://dev.azure.com/myorg` or `https://devops.example.com/tfs/CollectionA`; several of them = one `[[provider]]` per `url`.
+**Azure DevOps:** `url` is the organization or collection URL, e.g. `https://dev.azure.com/myorg` or `https://devops.example.com/tfs/CollectionA`; several of them = one `[[provider]]` per `url`. In `gx setup` you can also give just the server (`https://devops.example.com/tfs`, or whatever its virtual directory is): gx lists its collections and adds the ones you pick. If git has no credential helper, setup offers to configure Git Credential Manager, since a sign-in is otherwise forgotten when gx exits.
 
 **GitLab over SSH:** `auth = "ssh"` creates a 7-day `read_api` token with your SSH key (`ssh git@host personal_access_token gx-<machine> read_api <date>`, GitLab 14.2+), caches it in the user cache dir (`0600`) and renews it a day before expiry or when revoked. Set `ssh = "ssh://git@host:2222"` if SSH isn't `git@<host>:22`. The tokens show up in GitLab under *Access tokens* as `gx-<machine>`.
 

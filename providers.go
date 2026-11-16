@@ -399,6 +399,34 @@ func (c *apiClient) azure(ctx context.Context) ([]Remote, error) {
 	return c.azureRemotes(resp.Value), nil
 }
 
+// azureCollections lists the project collections when p.URL is an Azure
+// DevOps Server URL above the collections (e.g. https://server/tfs). For a
+// collection or organization URL it returns nil.
+func azureCollections(ctx context.Context, p ProviderConfig, cred credential) ([]string, error) {
+	var resp struct {
+		Value []struct {
+			Name string `json:"name"`
+		} `json:"value"`
+	}
+	_, err := newAPIClient(p, cred).get(ctx, p.URL+"/_apis/projectCollections?api-version=5.0", &resp)
+	var se *statusError
+	if errors.As(err, &se) && se.code == http.StatusNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	last := p.URL[strings.LastIndex(p.URL, "/")+1:]
+	var names []string
+	for _, c := range resp.Value {
+		if strings.EqualFold(c.Name, last) {
+			return nil, nil // already a collection URL
+		}
+		names = append(names, c.Name)
+	}
+	return names, nil
+}
+
 func (c *apiClient) azureRemotes(repos []azureRepo) []Remote {
 	var out []Remote
 	for _, r := range repos {
@@ -494,6 +522,7 @@ func loadRemotes(cfg *Config, refresh bool) []Remote {
 		if !askYes(os.Stdin, "Sign in to "+p.Label()+"?") {
 			continue
 		}
+		ensureHelper(stdAsker())
 		// Own timeout: a browser sign-in can take longer than the fetch.
 		sctx, scancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		rs, err := p.signIn(sctx, rejected[i])
