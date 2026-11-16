@@ -209,7 +209,11 @@ You usually don't need to create tokens. Without `token`, `token_env` or `token_
 | Azure DevOps | git credential helper |
 | Bitbucket | git credential helper |
 
-**git credential helper** means whatever git itself uses for HTTPS: Git Credential Manager, macOS Keychain, libsecret, `pass`… If you have cloned from a host over HTTPS once, gx can list its repos. Prompts are disabled, so a missing credential fails fast instead of hanging.
+**git credential helper** means whatever git itself uses for HTTPS: Git Credential Manager, macOS Keychain, libsecret, `pass`… If you have cloned from a host over HTTPS once, gx can list its repos.
+
+If nothing usable is stored, `gx l` run in a terminal offers to sign in once: Git Credential Manager opens the browser for dev.azure.com, or asks for a PAT on Azure DevOps Server (without GCM, git asks in the terminal: any username, and a PAT as the password). A credential that works is saved for `git clone` too; one the server rejects is forgotten, so the next `gx l` asks again. Scripts and `gx doctor` never prompt; they print a hint instead.
+
+Collections on one Azure DevOps Server share a stored credential (git keys it by host), so use a PAT that covers all of them, or `token_cmd` per provider. Servers that only accept Windows sign-in (NTLM/Kerberos) need `token_cmd` with a PAT.
 
 Pin a method with `auth = "token" | "gh" | "glab" | "git-credential"`.
 

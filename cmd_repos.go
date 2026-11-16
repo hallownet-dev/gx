@@ -465,6 +465,9 @@ func cmdDoctor(args []string) error {
 					via = " (auth " + method + ")"
 				}
 				results[i] = red("✗") + " " + p.Label() + via + ": " + err.Error()
+				if needsSignIn(err) && p.canSignIn() {
+					results[i] += " (" + signInHint + ")"
+				}
 				return
 			}
 			results[i] = fmt.Sprintf("%s %s: %d repositories (auth %s, clone %s, %s)", green("✓"), p.Label(), len(rs),

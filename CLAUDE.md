@@ -24,7 +24,8 @@ Flat `package main`, one file per concern:
 - Changing directory: a process can't change its parent's directory, so gx writes the target to `$GX_CD_FILE` and the shell function from `gx shell <sh>` does the `cd`. Without the wrapper the path goes to stdout.
 - `gx p -f` maps to `--force-with-lease`; `gx c` with nothing staged opens a file picker rather than silently staging everything.
 - `auth = "ssh"` is never tried automatically, because it creates a token on the server.
-- Credential helpers are called with prompting disabled (`GIT_TERMINAL_PROMPT=0`, `credential.interactive=never`), so a missing credential must fail fast, never hang.
+- Credential helpers are called with prompting disabled (`GIT_TERMINAL_PROMPT=0`, `credential.interactive=never`), so a missing credential must fail fast, never hang. The one exception is the sign-in `gx l` offers when stdin and stderr are terminals (`signIn`: prompting `git credential fill`, then `approve`). A 401 on a git-credential secret runs `git credential reject`.
+- No `az` CLI: it broke across versions. Azure DevOps auth is git credentials or a token only.
 - Archived repos are hidden unless `include_archived = true`.
 - Errors from a single provider are warnings; `gx l` still shows the others (and stale cache if available).
 

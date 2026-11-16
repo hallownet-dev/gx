@@ -64,6 +64,8 @@ func (p ProviderConfig) credential(ctx context.Context) (credential, error) {
 	return credential{}, fmt.Errorf("%w (%s)", errNoCredential, strings.Join(errs, "; "))
 }
 
+const signInHint = "run gx l in a terminal to sign in"
+
 // errNoCredential means no auth method produced a credential.
 var errNoCredential = errors.New("no credentials")
 
