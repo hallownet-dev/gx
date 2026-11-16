@@ -140,7 +140,7 @@ A program can't change its parent shell's directory, so `gx l`, `gx j` and `gx c
 
 In PowerShell, `$PROFILE` may not exist yet: create it with `New-Item -Force $PROFILE`, then `notepad $PROFILE`. Without the integration (e.g. in `cmd.exe`) everything still works, and the target path is printed instead.
 
-Then check the setup with `gx doctor`, and create a config with `gx config` if you use more than GitHub via `gh`.
+Then run `gx setup`: it asks where repositories should live, which VCSs you use (GitHub, GitLab, Bitbucket, Azure DevOps), signs you in and checks that each one lists your repositories. `gx doctor` checks everything again later.
 
 ## Commands
 
@@ -153,6 +153,11 @@ repositories
   ov               overview of local repos needing attention (-a all, -f fetch)
   ls               list local repositories
   adopt <dir>...   move existing clones into the tree (-n dry run)
+
+setup
+  setup            choose your VCSs and sign in (rerun to start over)
+  config           change settings and VCSs (path / edit: open in editor)
+  doctor           check git, config and provider credentials
 
 working
   s                status
@@ -168,7 +173,11 @@ Anything else goes straight to git: `gx rebase -i main`. `gx` alone is `gx s`.
 
 ## Configuration
 
-`gx config` creates `~/.config/gx/config.toml` (same location on every OS; override with `GX_CONFIG`). Without a config, gx uses GitHub via `gh auth token`.
+`gx setup` writes `~/.config/gx/config.toml` (same location on every OS; override with `GX_CONFIG`). Rerunning it starts over. `gx config` shows the settings and VCSs as a numbered menu: pick one to change it, remove a VCS, check its sign-in, or add another. Every change is checked before it's saved. Without a terminal, `gx config` prints the file; `gx config edit` opens it in `$EDITOR` for options the menu doesn't cover (tokens, `auth`, `protocol` per provider, …). gx writes the file itself, so comments in it are not kept.
+
+Without a config, `gx l` offers to run setup; gx doesn't assume any VCS.
+
+Example of everything the file can hold:
 
 ```toml
 root = "~/Projects"

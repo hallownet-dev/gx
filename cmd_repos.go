@@ -49,6 +49,9 @@ func cmdList(args []string) error {
 	if err != nil {
 		return err
 	}
+	if cfg, err = requireConfig(cfg); err != nil {
+		return err
+	}
 	remotes := loadRemotes(cfg, f["-r"])
 	if len(remotes) == 0 {
 		return fmt.Errorf("no repositories found (check %s or run gx doctor)", cfg.path)
@@ -440,7 +443,7 @@ func cmdDoctor(args []string) error {
 	if _, err := os.Stat(cfg.path); err == nil {
 		ok("config " + cfg.path)
 	} else {
-		fmt.Printf("%s no config at %s (defaults in use, run `gx config` to create one)\n", yellow("!"), cfg.path)
+		fmt.Printf("%s no config at %s (run `gx setup`)\n", red("✗"), cfg.path)
 	}
 	ok("root " + cfg.Root)
 	if os.Getenv("GX_CD_FILE") != "" {
