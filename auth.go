@@ -72,6 +72,23 @@ const signInHint = "run gx l in a terminal to sign in"
 // errNoCredential means no auth method produced a credential.
 var errNoCredential = errors.New("no credentials")
 
+// sessionCreds holds credentials typed in during this run, by host (git keys
+// credentials by host too), so one sign-in covers every provider on a server
+// even when no credential helper stores it.
+var sessionCreds = map[string]credential{}
+
+func rememberSession(p ProviderConfig, c credential) { sessionCreds[p.Host] = c }
+
+// listSession lists with this run's credential for p's host, if any works.
+func (p ProviderConfig) listSession(ctx context.Context) ([]Remote, bool) {
+	c, ok := sessionCreds[p.Host]
+	if !ok {
+		return nil, false
+	}
+	rs, err := p.listCred(ctx, c)
+	return rs, err == nil
+}
+
 var helperChecked bool
 
 // ensureHelper warns, once per run, when git has no credential helper: a
@@ -85,7 +102,8 @@ func ensureHelper(a *asker) {
 	if out, _ := gitOut("", "config", "--get-all", "credential.helper"); strings.TrimSpace(out) != "" {
 		return
 	}
-	if _, err := exec.LookPath("git-credential-manager"); err == nil &&
+	// Ask git rather than PATH: Git for Windows ships GCM in its own exec path.
+	if _, err := gitOut("", "credential-manager", "--version"); err == nil &&
 		a.yes("git has no credential helper, so this sign-in wouldn't be remembered. Use Git Credential Manager (git config --global credential.helper manager)?", true) {
 		if _, err := gitOut("", "config", "--global", "credential.helper", "manager"); err != nil {
 			fmt.Fprintf(a.out, "%s %v\n", red("✗"), err)
@@ -136,6 +154,9 @@ func (p ProviderConfig) signIn(ctx context.Context, stale bool) ([]Remote, error
 	var se *statusError
 	if err == nil || errors.As(err, &se) && se.code == http.StatusUnauthorized {
 		gitCredentialStore(ctx, p.credentialURL(), cred, err == nil)
+	}
+	if err == nil {
+		rememberSession(p, cred)
 	}
 	return rs, err
 }
