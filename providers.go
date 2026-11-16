@@ -44,6 +44,14 @@ func (p ProviderConfig) list(ctx context.Context) ([]Remote, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
+	out, err := p.listCred(ctx, cred)
+	return out, cred.Method, err
+}
+
+// listCred lists with cred: renews a revoked SSH-minted token once, makes
+// git credential helpers forget a rejected secret, and hides archived repos
+// unless configured otherwise.
+func (p ProviderConfig) listCred(ctx context.Context, cred credential) ([]Remote, error) {
 	out, err := p.listWith(ctx, cred)
 	var se *statusError
 	if errors.As(err, &se) && se.code == http.StatusUnauthorized && cred.Method == "ssh" {
@@ -52,8 +60,11 @@ func (p ProviderConfig) list(ctx context.Context) ([]Remote, string, error) {
 			out, err = p.listWith(ctx, cred)
 		}
 	}
+	if cred.Method == "git-credential" && (err == nil || needsSignIn(err)) {
+		gitCredentialStore(ctx, p.credentialURL(), cred, err == nil)
+	}
 	if err != nil {
-		return nil, cred.Method, err
+		return nil, err
 	}
 	if !p.Archived {
 		kept := out[:0]
@@ -64,7 +75,7 @@ func (p ProviderConfig) list(ctx context.Context) ([]Remote, string, error) {
 		}
 		out = kept
 	}
-	return out, cred.Method, nil
+	return out, nil
 }
 
 func (p ProviderConfig) listWith(ctx context.Context, cred credential) ([]Remote, error) {
