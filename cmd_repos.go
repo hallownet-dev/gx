@@ -465,7 +465,7 @@ func cmdDoctor(args []string) error {
 					via = " (auth " + method + ")"
 				}
 				results[i] = red("✗") + " " + p.Label() + via + ": " + err.Error()
-				if needsSignIn(err) && p.canSignIn() {
+				if p.offerSignIn(err, method) {
 					results[i] += " (" + signInHint + ")"
 				}
 				return

@@ -48,9 +48,8 @@ func (p ProviderConfig) list(ctx context.Context) ([]Remote, string, error) {
 	return out, cred.Method, err
 }
 
-// listCred lists with cred: renews a revoked SSH-minted token once, makes
-// git credential helpers forget a rejected secret, and hides archived repos
-// unless configured otherwise.
+// listCred lists with cred: renews a revoked SSH-minted token once and hides
+// archived repos unless configured otherwise.
 func (p ProviderConfig) listCred(ctx context.Context, cred credential) ([]Remote, error) {
 	out, err := p.listWith(ctx, cred)
 	var se *statusError
@@ -59,9 +58,6 @@ func (p ProviderConfig) listCred(ctx context.Context, cred credential) ([]Remote
 		if cred, err = p.credentialVia(ctx, "ssh", true); err == nil {
 			out, err = p.listWith(ctx, cred)
 		}
-	}
-	if cred.Method == "git-credential" && (err == nil || needsSignIn(err)) {
-		gitCredentialStore(ctx, p.credentialURL(), cred, err == nil)
 	}
 	if err != nil {
 		return nil, err
@@ -447,7 +443,10 @@ func loadRemotes(cfg *Config, refresh bool) []Remote {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	pending := 0
-	signIn := make([]error, len(cfg.Providers)) // failures to offer a sign-in for, after the spinner
+	// Failures to offer a sign-in for after the spinner, and whether a stored
+	// git credential was rejected (so the sign-in forgets it first).
+	signIn := make([]error, len(cfg.Providers))
+	rejected := make([]bool, len(cfg.Providers))
 	for i, p := range cfg.Providers {
 		e, ok := cache[p.ID()]
 		if ok && !refresh && time.Since(e.Fetched) < cfg.ttl {
@@ -458,12 +457,12 @@ func loadRemotes(cfg *Config, refresh bool) []Remote {
 		wg.Add(1)
 		go func(i int, p ProviderConfig, stale cacheEntry, hasStale bool) {
 			defer wg.Done()
-			rs, _, err := p.list(ctx)
+			rs, method, err := p.list(ctx)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
-				if needsSignIn(err) && p.canSignIn() {
-					signIn[i] = err
+				if p.offerSignIn(err, method) {
+					signIn[i], rejected[i] = err, method == "git-credential"
 				} else {
 					fmt.Fprintf(os.Stderr, "%s %s: %v\n", yellow("warning"), p.Label(), err)
 				}
@@ -497,7 +496,7 @@ func loadRemotes(cfg *Config, refresh bool) []Remote {
 		}
 		// Own timeout: a browser sign-in can take longer than the fetch.
 		sctx, scancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		rs, err := p.signIn(sctx)
+		rs, err := p.signIn(sctx, rejected[i])
 		scancel()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%s %s: %v\n", yellow("warning"), p.Label(), err)
