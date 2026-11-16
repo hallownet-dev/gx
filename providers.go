@@ -447,6 +447,7 @@ func loadRemotes(cfg *Config, refresh bool) []Remote {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	pending := 0
+	signIn := make([]error, len(cfg.Providers)) // failures to offer a sign-in for, after the spinner
 	for i, p := range cfg.Providers {
 		e, ok := cache[p.ID()]
 		if ok && !refresh && time.Since(e.Fetched) < cfg.ttl {
@@ -461,7 +462,11 @@ func loadRemotes(cfg *Config, refresh bool) []Remote {
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "%s %s: %v\n", yellow("warning"), p.Label(), err)
+				if needsSignIn(err) && p.canSignIn() {
+					signIn[i] = err
+				} else {
+					fmt.Fprintf(os.Stderr, "%s %s: %v\n", yellow("warning"), p.Label(), err)
+				}
 				if hasStale {
 					results[i] = stale.Remotes
 				}
@@ -476,6 +481,31 @@ func loadRemotes(cfg *Config, refresh bool) []Remote {
 		stop := spinner(fmt.Sprintf("fetching repositories from %d provider(s)", pending))
 		wg.Wait()
 		stop()
+	}
+	for i, failed := range signIn {
+		if failed == nil {
+			continue
+		}
+		p := cfg.Providers[i]
+		if !stdinTTY || !stderrTTY {
+			fmt.Fprintf(os.Stderr, "%s %s: %v; %s\n", yellow("warning"), p.Label(), failed, signInHint)
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "%s: %v\n", p.Label(), failed)
+		if !askYes(os.Stdin, "Sign in to "+p.Label()+"?") {
+			continue
+		}
+		// Own timeout: a browser sign-in can take longer than the fetch.
+		sctx, scancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		rs, err := p.signIn(sctx)
+		scancel()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s %s: %v\n", yellow("warning"), p.Label(), err)
+			continue
+		}
+		results[i] = rs
+		cache[p.ID()] = cacheEntry{Fetched: time.Now(), Remotes: rs}
+		changed = true
 	}
 	if changed {
 		if b, err := json.Marshal(cache); err == nil {

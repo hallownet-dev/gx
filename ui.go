@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 var errCancelled = errors.New("cancelled")
 
 var (
+	stdinTTY  = term.IsTerminal(int(os.Stdin.Fd()))
 	stdoutTTY = term.IsTerminal(int(os.Stdout.Fd()))
 	stderrTTY = term.IsTerminal(int(os.Stderr.Fd()))
 	useColor  = stdoutTTY && os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb"
@@ -103,6 +105,19 @@ func confirm(q string) bool {
 	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
 	a := strings.ToLower(strings.TrimSpace(line))
 	return a == "y" || a == "yes"
+}
+
+// askYes asks a question that defaults to yes. Enter means yes; end of input
+// (Ctrl-D) means no.
+func askYes(r io.Reader, q string) bool {
+	fmt.Fprintf(os.Stderr, "%s [Y/n] ", q)
+	line, err := bufio.NewReader(r).ReadString('\n')
+	if err != nil && line == "" {
+		fmt.Fprintln(os.Stderr)
+		return false
+	}
+	a := strings.ToLower(strings.TrimSpace(line))
+	return a == "" || a == "y" || a == "yes"
 }
 
 func relTime(t time.Time) string {
