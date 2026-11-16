@@ -42,7 +42,8 @@ working
   lg [n]           short graph log
 
 setup
-  config [edit]    print (or edit) the config file, creating it if missing
+  setup            choose your VCSs and sign in (rerun to start over)
+  config           change settings and VCSs (path: print location, edit: open in editor)
   doctor           check git, config and provider credentials
   shell <sh>       print shell integration (bash, zsh, fish, pwsh) so gx can cd
   version
@@ -110,6 +111,8 @@ func run(args []string) error {
 			n, rest = rest[0], rest[1:]
 		}
 		return git(append([]string{"log", "--graph", "--format=%C(yellow)%h%C(reset)%C(auto)%d%C(reset) %s %C(dim)· %an, %cr%C(reset)", "-n", n}, rest...)...)
+	case "setup":
+		return cmdSetup(rest)
 	case "config":
 		return cmdConfig(rest)
 	case "doctor":

@@ -14,6 +14,7 @@ Flat `package main`, one file per concern:
 - `auth.go`: credential resolution (token / gh / glab / git-credential / GitLab-over-ssh minting) with ordered fallback.
 - `providers.go`: per-provider API listing, Basic→Bearer retry on 401, remote list cache.
 - `config.go`: TOML config at `~/.config/gx/config.toml` on every OS (deliberately not `os.UserConfigDir`, so dotfiles sync works the same everywhere).
+- `cmd_config.go`: `setup` (first-run wizard, rerun = start over) and `config` (numbered-menu editor; `path`, `edit`). Line-based `asker` instead of the fuzzy picker so it's testable from a reader.
 - `cmd_repos.go`: `l j cl o ov ls adopt doctor`. `cmd_work.go`: `s a c p b`. `main.go`: dispatch, help, `gx shell`.
 - `git.go`: shells out to the `git` binary (keeps the user's SSH and credential setup); porcelain v2 status parser.
 - `ui.go`: colors, spinner, fuzzy picker (`ktr0731/go-fuzzyfinder`; no fzf dependency, works on Windows).
@@ -24,8 +25,9 @@ Flat `package main`, one file per concern:
 - Changing directory: a process can't change its parent's directory, so gx writes the target to `$GX_CD_FILE` and the shell function from `gx shell <sh>` does the `cd`. Without the wrapper the path goes to stdout.
 - `gx p -f` maps to `--force-with-lease`; `gx c` with nothing staged opens a file picker rather than silently staging everything.
 - `auth = "ssh"` is never tried automatically, because it creates a token on the server.
-- Credential helpers are called with prompting disabled (`GIT_TERMINAL_PROMPT=0`, `credential.interactive=never`), so a missing credential must fail fast, never hang. The one exception is the sign-in `gx l` offers when stdin and stderr are terminals (`signIn`: prompting `git credential fill`, then `approve`). Only that accepted sign-in changes stored credentials (it rejects the one the server refused first); plain listings, scripts and `gx doctor` never approve or reject, because an API 401 doesn't mean git itself is refused.
+- Credential helpers are called with prompting disabled (`GIT_TERMINAL_PROMPT=0`, `credential.interactive=never`), so a missing credential must fail fast, never hang. The one exception is the sign-in that `gx l`, `gx setup` and `gx config` offer when stdin and stderr are terminals (`signIn`: prompting `git credential fill`, then `approve`). Only that accepted sign-in changes stored credentials (it rejects the one the server refused first); plain listings, scripts and `gx doctor` never approve or reject, because an API 401 doesn't mean git itself is refused.
 - No `az` CLI: it broke across versions. Azure DevOps auth is git credentials or a token only.
+- The config file is written by gx (`saveConfig`: validate via `normalize` on a copy, write only what the user chose, no defaults); comments aren't preserved. No config = no providers: gx never assumes a VCS, `gx l` offers `gx setup`.
 - Archived repos are hidden unless `include_archived = true`.
 - Errors from a single provider are warnings; `gx l` still shows the others (and stale cache if available).
 
