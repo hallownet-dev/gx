@@ -149,10 +149,20 @@ func (c *apiClient) get(ctx context.Context, u string, v any) (http.Header, erro
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode/100 != 2 {
-			body, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 16<<10))
 			msg := strings.TrimSpace(string(body))
 			if strings.Contains(resp.Header.Get("Content-Type"), "html") {
 				msg = ""
+			}
+			// JSON errors (Azure DevOps, GitHub…): just the message.
+			var j struct {
+				Message string `json:"message"`
+			}
+			if json.Unmarshal(body, &j) == nil && j.Message != "" {
+				msg = j.Message
+			}
+			if len(msg) > 300 {
+				msg = msg[:300] + "…"
 			}
 			return nil, &statusError{resp.StatusCode, fmt.Sprintf("%s: %s %s", redactURL(u), resp.Status, msg)}
 		}

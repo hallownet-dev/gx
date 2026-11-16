@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -269,5 +271,33 @@ func TestEnsureHelper(t *testing.T) {
 func TestLabelDefaultsHost(t *testing.T) {
 	if got := (ProviderConfig{Type: "github"}).Label(); got != "github:github.com" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+// A stale stored credential rejected by the collections API leads to a
+// sign-in, not to a dead end.
+func TestCollectionsSignInAfterStaleCredential(t *testing.T) {
+	log := filepath.ToSlash(filepath.Join(t.TempDir(), "helper.log"))
+	// Hands out "stale" until gx erases it, then "good".
+	helper := `!f() { echo "$1" >> '` + log + `'; cat >/dev/null; test "$1" = get || exit 0; ` +
+		`if grep -q erase '` + log + `'; then p=good; else p=stale; fi; printf 'username=u\npassword=%s\n' $p; }; f`
+	isolateGit(t, helper)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, pass, _ := r.BasicAuth(); pass != "good" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_, _ = w.Write([]byte(`{"value":[{"name":"Alpha"},{"name":"Beta"}]}`))
+	}))
+	t.Cleanup(srv.Close)
+	sessionCreds = map[string]credential{}
+	p := ProviderConfig{Type: "azure", URL: srv.URL + "/projects"}
+	names, err := newChecker().collections(testAsker("y"), p)
+	if err != nil || !slices.Equal(names, []string{"Alpha", "Beta"}) {
+		t.Fatalf("got %v %v", names, err)
+	}
+	b, _ := os.ReadFile(log)
+	if l := string(b); !strings.Contains(l, "erase") || !strings.Contains(l, "store") {
+		t.Fatalf("want the stale credential erased and the new one stored; helper log: %q", l)
 	}
 }

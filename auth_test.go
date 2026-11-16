@@ -362,3 +362,15 @@ func TestSessionCredentialSharedByHost(t *testing.T) {
 		t.Fatal("a rejected session credential must not count")
 	}
 }
+
+func TestStatusErrorShowsJSONMessage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"$id":"1","innerException":null,"message":"TF400813: Resource not available for anonymous access.","typeName":"` + strings.Repeat("x", 400) + `"}`))
+	}))
+	t.Cleanup(srv.Close)
+	_, _, err := ProviderConfig{Type: "azure", URL: srv.URL + "/Coll", Token: "x"}.list(context.Background())
+	if err == nil || !strings.HasSuffix(err.Error(), "401 Unauthorized TF400813: Resource not available for anonymous access.") {
+		t.Fatalf("got %v", err)
+	}
+}

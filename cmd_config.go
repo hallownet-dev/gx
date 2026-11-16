@@ -150,26 +150,31 @@ func (c *liveChecker) collections(a *asker, p ProviderConfig) ([]string, error) 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	cred, err := p.credential(ctx)
-	if err != nil {
-		if !p.offerSignIn(err, "") {
-			return nil, err
-		}
+	var names []string
+	if err == nil {
+		names, err = azureCollections(ctx, p, cred)
+	}
+	// Nothing stored, or the stored git credential was rejected: sign in.
+	if err != nil && p.offerSignIn(err, cred.Method) {
 		fmt.Fprintf(a.out, "%s: %v\n", p.Label(), err)
 		ensureHelper(a)
 		if !a.yes("Sign in to "+p.Host+"?", true) {
 			return nil, err
 		}
-		user, secret, err := gitCredential(ctx, p.credentialURL(), true)
-		if err != nil {
-			return nil, err
+		if cred.Method == "git-credential" {
+			gitCredentialStore(ctx, p.credentialURL(), cred, false) // forget the stale one
+		}
+		user, secret, ferr := gitCredential(ctx, p.credentialURL(), true)
+		if ferr != nil {
+			return nil, ferr
 		}
 		if user == "" {
 			user = p.Username
 		}
 		cred = credential{Method: "git-credential", User: user, Secret: secret}
 		rememberSession(p, cred)
+		names, err = azureCollections(ctx, p, cred)
 	}
-	names, err := azureCollections(ctx, p, cred)
 	if err == nil && len(names) > 0 && cred.Method == "git-credential" {
 		gitCredentialStore(ctx, p.credentialURL(), cred, true) // the server accepted it
 	}
@@ -211,7 +216,10 @@ func addProviders(a *asker, c checker) []ProviderConfig {
 	if v.typ == "azure" {
 		cols, err := c.collections(a, p)
 		if err != nil {
+			// Checking the URL itself would only fail again (a server URL
+			// has no repository API).
 			fmt.Fprintf(a.out, "%s %v\n", red("✗"), err)
+			return nil
 		}
 		if len(cols) > 0 {
 			candidates = nil
