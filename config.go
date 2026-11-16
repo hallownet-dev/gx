@@ -41,6 +41,8 @@ type ProviderConfig struct {
 	Archived bool     `toml:"include_archived,omitempty"`
 }
 
+var defaultHosts = map[string]string{"github": "github.com", "gitlab": "gitlab.com", "bitbucket": "bitbucket.org"}
+
 // ID identifies a provider in the cache; it changes when the endpoint does.
 func (p ProviderConfig) ID() string {
 	return p.Type + "|" + p.Host + "|" + p.URL + "|" + strings.Join(p.Owners, ",")
@@ -53,6 +55,9 @@ func (p ProviderConfig) Label() string {
 	if p.Type == "azure" && p.URL != "" {
 		_, rest, _ := strings.Cut(strings.TrimRight(p.URL, "/"), "://")
 		return "azure:" + rest
+	}
+	if p.Host == "" {
+		return p.Type + ":" + defaultHosts[p.Type]
 	}
 	return p.Type + ":" + p.Host
 }
@@ -149,7 +154,7 @@ func (cfg *Config) normalize() error {
 		switch p.Type {
 		case "github", "gitlab", "bitbucket":
 			if p.Host == "" {
-				p.Host = map[string]string{"github": "github.com", "gitlab": "gitlab.com", "bitbucket": "bitbucket.org"}[p.Type]
+				p.Host = defaultHosts[p.Type]
 			}
 		case "azure":
 			if p.URL == "" {

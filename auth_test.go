@@ -338,3 +338,27 @@ func TestAzureCollections(t *testing.T) {
 		}
 	}
 }
+
+// A credential entered for one provider is reused for others on the same
+// host in the same run (several Azure DevOps Server collections).
+func TestSessionCredentialSharedByHost(t *testing.T) {
+	isolateGit(t, "")
+	srv := azureServer(t, func(r *http.Request) bool {
+		_, pass, ok := r.BasicAuth()
+		return ok && pass == "s3cret"
+	})
+	sessionCreds = map[string]credential{}
+	a := ProviderConfig{Type: "azure", URL: srv.URL + "/Coll", Host: "127.0.0.1"}
+	b := ProviderConfig{Type: "azure", URL: srv.URL + "/Other", Host: "127.0.0.1"}
+	if _, ok := b.listSession(context.Background()); ok {
+		t.Fatal("nothing signed in yet")
+	}
+	rememberSession(a, credential{Method: "git-credential", User: "alice", Secret: "s3cret"})
+	if rs, ok := b.listSession(context.Background()); !ok || len(rs) != 1 {
+		t.Fatalf("want reuse for the same host, got %v %v", rs, ok)
+	}
+	rememberSession(a, credential{Method: "git-credential", Secret: "wrong"})
+	if _, ok := b.listSession(context.Background()); ok {
+		t.Fatal("a rejected session credential must not count")
+	}
+}

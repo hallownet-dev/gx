@@ -265,3 +265,9 @@ func TestEnsureHelper(t *testing.T) {
 		t.Fatalf("helper configured, want silence, got %q", out.String())
 	}
 }
+
+func TestLabelDefaultsHost(t *testing.T) {
+	if got := (ProviderConfig{Type: "github"}).Label(); got != "github:github.com" {
+		t.Fatalf("got %q", got)
+	}
+}

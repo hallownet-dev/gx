@@ -514,6 +514,17 @@ func loadRemotes(cfg *Config, refresh bool) []Remote {
 			continue
 		}
 		p := cfg.Providers[i]
+		// Signed in for another provider on this host already (e.g. another
+		// collection on the same Azure DevOps Server)?
+		lctx, lcancel := context.WithTimeout(context.Background(), 60*time.Second)
+		rs, ok := p.listSession(lctx)
+		lcancel()
+		if ok {
+			results[i] = rs
+			cache[p.ID()] = cacheEntry{Fetched: time.Now(), Remotes: rs}
+			changed = true
+			continue
+		}
 		if !stdinTTY || !stderrTTY {
 			fmt.Fprintf(os.Stderr, "%s %s: %v; %s\n", yellow("warning"), p.Label(), failed, signInHint)
 			continue

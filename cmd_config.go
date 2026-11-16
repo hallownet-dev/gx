@@ -104,9 +104,9 @@ type checker interface {
 // liveChecker is the real checker. A credential entered during this run is
 // kept per host until a listing proves it works, so one sign-in covers every
 // collection on a server even without a credential helper.
-type liveChecker struct{ pending map[string]credential }
+type liveChecker struct{}
 
-func newChecker() *liveChecker { return &liveChecker{pending: map[string]credential{}} }
+func newChecker() *liveChecker { return &liveChecker{} }
 
 func normalized(p ProviderConfig) (ProviderConfig, error) {
 	tmp := &Config{Providers: []ProviderConfig{p}}
@@ -123,12 +123,9 @@ func (c *liveChecker) check(a *asker, p ProviderConfig) (int, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	if cred, ok := c.pending[p.Host]; ok {
-		rs, err := p.listCred(ctx, cred)
-		if err == nil {
-			gitCredentialStore(ctx, p.credentialURL(), cred, true)
-			return len(rs), nil
-		}
+	if rs, ok := p.listSession(ctx); ok {
+		gitCredentialStore(ctx, p.credentialURL(), sessionCreds[p.Host], true)
+		return len(rs), nil
 	}
 	stop := spinner("checking " + p.Label())
 	rs, method, err := p.list(ctx)
@@ -170,7 +167,7 @@ func (c *liveChecker) collections(a *asker, p ProviderConfig) ([]string, error) 
 			user = p.Username
 		}
 		cred = credential{Method: "git-credential", User: user, Secret: secret}
-		c.pending[p.Host] = cred
+		rememberSession(p, cred)
 	}
 	names, err := azureCollections(ctx, p, cred)
 	if err == nil && len(names) > 0 && cred.Method == "git-credential" {
