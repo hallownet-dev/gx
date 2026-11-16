@@ -72,6 +72,29 @@ const signInHint = "run gx l in a terminal to sign in"
 // errNoCredential means no auth method produced a credential.
 var errNoCredential = errors.New("no credentials")
 
+var helperChecked bool
+
+// ensureHelper warns, once per run, when git has no credential helper: a
+// sign-in would then work only until gx exits. If Git Credential Manager is
+// installed, it offers to configure it.
+func ensureHelper(a *asker) {
+	if helperChecked {
+		return
+	}
+	helperChecked = true
+	if out, _ := gitOut("", "config", "--get-all", "credential.helper"); strings.TrimSpace(out) != "" {
+		return
+	}
+	if _, err := exec.LookPath("git-credential-manager"); err == nil &&
+		a.yes("git has no credential helper, so this sign-in wouldn't be remembered. Use Git Credential Manager (git config --global credential.helper manager)?", true) {
+		if _, err := gitOut("", "config", "--global", "credential.helper", "manager"); err != nil {
+			fmt.Fprintf(a.out, "%s %v\n", red("✗"), err)
+		}
+		return
+	}
+	fmt.Fprintf(a.out, "%s git has no credential helper: this sign-in won't be remembered (see README, Authentication)\n", yellow("!"))
+}
+
 // errWindowsSignIn means Git Credential Manager answered with an empty
 // credential, which it does for servers using Windows sign-in (NTLM/Kerberos).
 var errWindowsSignIn = errors.New("server returned no credential (Windows sign-in?); set token_cmd to a PAT")

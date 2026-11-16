@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -310,5 +311,30 @@ func TestGitCredentialEmptyPassword(t *testing.T) {
 	_, _, err := gitCredential(context.Background(), "https://devops.example.com/tfs/Coll", false)
 	if err == nil || !strings.Contains(err.Error(), "Windows sign-in") {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestAzureCollections(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/projects/_apis/projectCollections":
+			_, _ = w.Write([]byte(`{"count":2,"value":[{"name":"Alpha"},{"name":"Beta"}]}`))
+		case "/projects/Alpha/_apis/projectCollections": // some servers answer at collection level too
+			_, _ = w.Write([]byte(`{"count":2,"value":[{"name":"Alpha"},{"name":"Beta"}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	cred := credential{Method: "token", Secret: "x"}
+	ctx := context.Background()
+	got, err := azureCollections(ctx, ProviderConfig{Type: "azure", URL: srv.URL + "/projects"}, cred)
+	if err != nil || !slices.Equal(got, []string{"Alpha", "Beta"}) {
+		t.Fatalf("server URL: %v %v", got, err)
+	}
+	for _, u := range []string{srv.URL + "/projects/Alpha", srv.URL + "/tfs/Coll"} {
+		if got, err := azureCollections(ctx, ProviderConfig{Type: "azure", URL: u}, cred); err != nil || got != nil {
+			t.Fatalf("collection URL %s: want nil, got %v %v", u, got, err)
+		}
 	}
 }

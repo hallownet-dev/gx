@@ -91,23 +91,51 @@ func (a *asker) choose(title string, opts []string, def int) int {
 // menu is choose where empty input means done (-1).
 func (a *asker) menu(title string, opts []string) int { return a.choose(title, opts, -1) }
 
-// checkFunc lists a provider's repositories, signing in when needed, and
-// returns how many it found.
-type checkFunc func(a *asker, p ProviderConfig) (int, error)
+// checker talks to the VCS for setup and config; tests replace it.
+type checker interface {
+	// check lists p's repositories, signing in when needed, and returns how
+	// many it found.
+	check(a *asker, p ProviderConfig) (int, error)
+	// collections returns the project collections when p is an Azure DevOps
+	// Server URL above them, nil otherwise.
+	collections(a *asker, p ProviderConfig) ([]string, error)
+}
 
-func checkProvider(a *asker, p ProviderConfig) (int, error) {
+// liveChecker is the real checker. A credential entered during this run is
+// kept per host until a listing proves it works, so one sign-in covers every
+// collection on a server even without a credential helper.
+type liveChecker struct{ pending map[string]credential }
+
+func newChecker() *liveChecker { return &liveChecker{pending: map[string]credential{}} }
+
+func normalized(p ProviderConfig) (ProviderConfig, error) {
 	tmp := &Config{Providers: []ProviderConfig{p}}
 	if err := tmp.normalize(); err != nil {
+		return p, err
+	}
+	return tmp.Providers[0], nil
+}
+
+func (c *liveChecker) check(a *asker, p ProviderConfig) (int, error) {
+	p, err := normalized(p)
+	if err != nil {
 		return 0, err
 	}
-	p = tmp.Providers[0]
-	stop := spinner("checking " + p.Label())
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	if cred, ok := c.pending[p.Host]; ok {
+		rs, err := p.listCred(ctx, cred)
+		if err == nil {
+			gitCredentialStore(ctx, p.credentialURL(), cred, true)
+			return len(rs), nil
+		}
+	}
+	stop := spinner("checking " + p.Label())
 	rs, method, err := p.list(ctx)
-	cancel()
 	stop()
 	if err != nil && p.offerSignIn(err, method) {
 		fmt.Fprintf(a.out, "%s: %v\n", p.Label(), err)
+		ensureHelper(a)
 		if a.yes("Sign in to "+p.Label()+"?", true) {
 			sctx, scancel := context.WithTimeout(context.Background(), 5*time.Minute)
 			rs, err = p.signIn(sctx, method == "git-credential")
@@ -117,6 +145,40 @@ func checkProvider(a *asker, p ProviderConfig) (int, error) {
 	return len(rs), err
 }
 
+func (c *liveChecker) collections(a *asker, p ProviderConfig) ([]string, error) {
+	p, err := normalized(p)
+	if err != nil || p.Type != "azure" || p.Host == "dev.azure.com" {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	cred, err := p.credential(ctx)
+	if err != nil {
+		if !p.offerSignIn(err, "") {
+			return nil, err
+		}
+		fmt.Fprintf(a.out, "%s: %v\n", p.Label(), err)
+		ensureHelper(a)
+		if !a.yes("Sign in to "+p.Host+"?", true) {
+			return nil, err
+		}
+		user, secret, err := gitCredential(ctx, p.credentialURL(), true)
+		if err != nil {
+			return nil, err
+		}
+		if user == "" {
+			user = p.Username
+		}
+		cred = credential{Method: "git-credential", User: user, Secret: secret}
+		c.pending[p.Host] = cred
+	}
+	names, err := azureCollections(ctx, p, cred)
+	if err == nil && len(names) > 0 && cred.Method == "git-credential" {
+		gitCredentialStore(ctx, p.credentialURL(), cred, true) // the server accepted it
+	}
+	return names, err
+}
+
 var vcsTypes = []struct{ typ, name, host string }{
 	{"github", "GitHub", "github.com"},
 	{"gitlab", "GitLab", "gitlab.com"},
@@ -124,36 +186,92 @@ var vcsTypes = []struct{ typ, name, host string }{
 	{"azure", "Azure DevOps", ""},
 }
 
-// addProvider asks for one VCS and checks it. ok is false when the user
-// cancels or drops a provider that failed the check.
-func addProvider(a *asker, check checkFunc) (p ProviderConfig, ok bool) {
+// addProviders asks for one VCS (or, for an Azure DevOps Server URL, the
+// collections to use) and checks each. Providers the user cancels or that
+// fail the check and aren't kept are left out.
+func addProviders(a *asker, c checker) []ProviderConfig {
 	names := make([]string, len(vcsTypes))
 	for i, v := range vcsTypes {
 		names[i] = v.name
 	}
 	i := a.menu("Which VCS?", names)
 	if i < 0 {
-		return p, false
+		return nil
 	}
 	v := vcsTypes[i]
-	p.Type = v.typ
+	p := ProviderConfig{Type: v.typ}
 	if v.typ == "azure" {
-		p.URL = a.line("Organization or collection URL (https://dev.azure.com/<org> or https://<server>/tfs/<collection>)", "")
+		p.URL = strings.TrimRight(a.line("URL (https://dev.azure.com/<org>, or your server: https://<server>/tfs, or one collection: https://<server>/tfs/<collection>)", ""), "/")
 		if p.URL == "" {
-			return p, false
+			return nil
 		}
 	} else if h := a.line("Host ("+v.host+", or your server's host)", v.host); h != v.host {
 		p.Host = h
 	}
 	p.Owners = splitList(a.line("Only list repositories of (comma-separated users/orgs/projects, empty = all)", ""))
 
-	n, err := check(a, p)
-	if err != nil {
-		fmt.Fprintf(a.out, "%s %v\n", red("✗"), err)
-		return p, a.yes("Keep it anyway?", false)
+	candidates := []ProviderConfig{p}
+	if v.typ == "azure" {
+		cols, err := c.collections(a, p)
+		if err != nil {
+			fmt.Fprintf(a.out, "%s %v\n", red("✗"), err)
+		}
+		if len(cols) > 0 {
+			candidates = nil
+			for _, k := range pickCollections(a, cols) {
+				q := p
+				q.URL = p.URL + "/" + cols[k]
+				candidates = append(candidates, q)
+			}
+		}
 	}
-	fmt.Fprintf(a.out, "%s %d repositories\n", green("✓"), n)
-	return p, true
+
+	var out []ProviderConfig
+	for _, q := range candidates {
+		n, err := c.check(a, q)
+		if err != nil {
+			fmt.Fprintf(a.out, "%s %s: %v\n", red("✗"), q.Label(), err)
+			if !a.yes("Keep it anyway?", false) {
+				continue
+			}
+		} else {
+			fmt.Fprintf(a.out, "%s %s: %d repositories\n", green("✓"), q.Label(), n)
+		}
+		out = append(out, q)
+	}
+	return out
+}
+
+// pickCollections lists the collections and returns the chosen indexes;
+// empty input means all.
+func pickCollections(a *asker, cols []string) []int {
+	fmt.Fprintln(a.out, bold("Collections on this server"))
+	for i, c := range cols {
+		fmt.Fprintf(a.out, "  %2d) %s\n", i+1, c)
+	}
+	for {
+		s := a.line("Which ones? (numbers, comma-separated, empty = all)", "")
+		var idx []int
+		ok := true
+		for _, f := range splitList(s) {
+			n, err := strconv.Atoi(f)
+			if err != nil || n < 1 || n > len(cols) {
+				ok = false
+				break
+			}
+			idx = append(idx, n-1)
+		}
+		if !ok {
+			fmt.Fprintf(a.out, "type numbers from 1 to %d\n", len(cols))
+			continue
+		}
+		if len(idx) == 0 {
+			for i := range cols {
+				idx = append(idx, i)
+			}
+		}
+		return idx
+	}
 }
 
 func splitList(s string) []string {
@@ -167,7 +285,7 @@ func splitList(s string) []string {
 }
 
 // runSetup builds a new config from scratch: root, clone protocol, VCSs.
-func runSetup(a *asker, path string, check checkFunc) error {
+func runSetup(a *asker, path string, c checker) error {
 	if old, err := readConfig(path); err == nil && old.exists {
 		if !a.yes("This replaces your config at "+path+". Continue?", false) {
 			return errCancelled
@@ -181,9 +299,7 @@ func runSetup(a *asker, path string, check checkFunc) error {
 		cfg.Protocol = "https"
 	}
 	for {
-		if p, ok := addProvider(a, check); ok {
-			cfg.Providers = append(cfg.Providers, p)
-		}
+		cfg.Providers = append(cfg.Providers, addProviders(a, c)...)
 		if !a.yes("Add another VCS?", false) {
 			break
 		}
@@ -202,7 +318,7 @@ func runSetup(a *asker, path string, check checkFunc) error {
 
 // runConfig is the interactive config editor: pick a setting or provider to
 // change it, or add a VCS. Every change is validated and saved right away.
-func runConfig(a *asker, path string, check checkFunc) error {
+func runConfig(a *asker, path string, c checker) error {
 	for {
 		cfg, err := readConfig(path)
 		if err != nil {
@@ -243,15 +359,15 @@ func runConfig(a *asker, path string, check checkFunc) error {
 			}
 			*s.val = v
 		case i < len(settings)+len(cfg.Providers):
-			if !editProvider(a, cfg, i-len(settings), check) {
+			if !editProvider(a, cfg, i-len(settings), c) {
 				continue
 			}
 		default:
-			p, ok := addProvider(a, check)
-			if !ok {
+			added := addProviders(a, c)
+			if len(added) == 0 {
 				continue
 			}
-			cfg.Providers = append(cfg.Providers, p)
+			cfg.Providers = append(cfg.Providers, added...)
 		}
 		if err := saveConfig(path, cfg); err != nil {
 			fmt.Fprintf(a.out, "%s not saved: %v\n", red("✗"), err)
@@ -262,11 +378,11 @@ func runConfig(a *asker, path string, check checkFunc) error {
 }
 
 // editProvider changes provider k in cfg; it reports whether cfg changed.
-func editProvider(a *asker, cfg *Config, k int, check checkFunc) bool {
+func editProvider(a *asker, cfg *Config, k int, c checker) bool {
 	p := &cfg.Providers[k]
 	switch a.menu(providerSummary(*p), []string{"check / sign in", "owners", "name", "remove"}) {
 	case 0:
-		if n, err := check(a, *p); err != nil {
+		if n, err := c.check(a, *p); err != nil {
 			fmt.Fprintf(a.out, "%s %v\n", red("✗"), err)
 		} else {
 			fmt.Fprintf(a.out, "%s %d repositories\n", green("✓"), n)
@@ -305,7 +421,7 @@ func cmdSetup(args []string) error {
 	if !stdinTTY || !stderrTTY {
 		return fmt.Errorf("gx setup needs a terminal")
 	}
-	return runSetup(stdAsker(), configPath(), checkProvider)
+	return runSetup(stdAsker(), configPath(), newChecker())
 }
 
 func cmdConfig(args []string) error {
@@ -349,7 +465,7 @@ func cmdConfig(args []string) error {
 	if !cfg.exists {
 		return cmdSetup(nil)
 	}
-	return runConfig(stdAsker(), path, checkProvider)
+	return runConfig(stdAsker(), path, newChecker())
 }
 
 // requireConfig offers setup when there is no config file yet.

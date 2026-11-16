@@ -50,6 +50,10 @@ func (p ProviderConfig) Label() string {
 	if p.Name != "" {
 		return p.Name
 	}
+	if p.Type == "azure" && p.URL != "" {
+		_, rest, _ := strings.Cut(strings.TrimRight(p.URL, "/"), "://")
+		return "azure:" + rest
+	}
 	return p.Type + ":" + p.Host
 }
 
