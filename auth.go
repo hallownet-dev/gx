@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
@@ -60,7 +61,35 @@ func (p ProviderConfig) credential(ctx context.Context) (credential, error) {
 		}
 		errs = append(errs, m+": "+err.Error())
 	}
-	return credential{}, fmt.Errorf("no credentials (%s)", strings.Join(errs, "; "))
+	return credential{}, fmt.Errorf("%w (%s)", errNoCredential, strings.Join(errs, "; "))
+}
+
+// errNoCredential means no auth method produced a credential.
+var errNoCredential = errors.New("no credentials")
+
+// needsSignIn reports whether err means the user has to sign in: nothing was
+// stored, or the server rejected what was.
+func needsSignIn(err error) bool {
+	var se *statusError
+	return errors.Is(err, errNoCredential) || errors.As(err, &se) && se.code == http.StatusUnauthorized
+}
+
+// canSignIn reports whether p can get a credential from an interactive
+// git credential fill.
+func (p ProviderConfig) canSignIn() bool { return slices.Contains(p.modes(), "git-credential") }
+
+// signIn asks git's credential helpers for a credential with prompting
+// allowed (Git Credential Manager opens a browser or asks for a PAT, plain
+// git asks in the terminal), lists with it, and stores it on success.
+func (p ProviderConfig) signIn(ctx context.Context) ([]Remote, error) {
+	user, secret, err := gitCredential(ctx, p.credentialURL(), true)
+	if err != nil {
+		return nil, err
+	}
+	if p.Username != "" && user == "" {
+		user = p.Username
+	}
+	return p.listCred(ctx, credential{Method: "git-credential", User: user, Secret: secret})
 }
 
 func (p ProviderConfig) credentialVia(ctx context.Context, mode string, renew bool) (credential, error) {
@@ -75,7 +104,7 @@ func (p ProviderConfig) credentialVia(ctx context.Context, mode string, renew bo
 		c.Secret, err = cmdOutput(ctx, nil, "glab", "config", "get", "token", "--host", p.Host)
 	case "git-credential":
 		var user string
-		user, c.Secret, err = gitCredential(ctx, p.credentialURL())
+		user, c.Secret, err = gitCredential(ctx, p.credentialURL(), false)
 		if user != "" {
 			c.User = user
 		}
@@ -142,26 +171,45 @@ func cmdOutput(ctx context.Context, env []string, name string, args ...string) (
 	return strings.TrimSpace(string(out)), nil
 }
 
-// gitCredential asks git's configured credential helpers (Git Credential
-// Manager, osxkeychain, libsecret, store, …) for the credentials of rawURL.
-// Prompting is disabled so it fails instead of blocking.
-func gitCredential(ctx context.Context, rawURL string) (user, secret string, err error) {
+// credentialInput is the request git credential reads for rawURL.
+func credentialInput(rawURL string) (string, *url.URL, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil || u.Host == "" {
-		return "", "", fmt.Errorf("bad URL %q", rawURL)
+		return "", nil, fmt.Errorf("bad URL %q", rawURL)
 	}
 	// git drops path itself unless credential.useHttpPath is set for the host.
 	in := fmt.Sprintf("protocol=%s\nhost=%s\n", u.Scheme, u.Host)
 	if p := strings.Trim(u.Path, "/"); p != "" {
 		in += "path=" + p + "\n"
 	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", "-c", "credential.interactive=never", "credential", "fill")
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never", "GIT_ASKPASS=", "SSH_ASKPASS=")
-	cmd.Stdin = strings.NewReader(in + "\n")
+	return in, u, nil
+}
+
+// noPrompt keeps git and Git Credential Manager from asking the user.
+var noPrompt = []string{"GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never", "GIT_ASKPASS=", "SSH_ASKPASS="}
+
+// gitCredential asks git's configured credential helpers (Git Credential
+// Manager, osxkeychain, libsecret, store, …) for the credentials of rawURL.
+// Unless interactive, prompting is disabled so it fails instead of blocking.
+func gitCredential(ctx context.Context, rawURL string, interactive bool) (user, secret string, err error) {
+	in, u, err := credentialInput(rawURL)
+	if err != nil {
+		return "", "", err
+	}
+	var cmd *exec.Cmd
 	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
+	if interactive {
+		cmd = exec.CommandContext(ctx, "git", "credential", "fill")
+		cmd.Stderr = os.Stderr
+	} else {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		cmd = exec.CommandContext(ctx, "git", "-c", "credential.interactive=never", "credential", "fill")
+		cmd.Env = append(os.Environ(), noPrompt...)
+		cmd.Stderr = &stderr
+	}
+	cmd.Stdin = strings.NewReader(in + "\n")
 	out, err := cmd.Output()
 	if err != nil {
 		msg, _, _ := strings.Cut(strings.TrimSpace(stderr.String()), "\n")
@@ -170,6 +218,7 @@ func gitCredential(ctx context.Context, rawURL string) (user, secret string, err
 		}
 		return "", "", fmt.Errorf("nothing stored for %s (%s)", u.Host, strings.TrimPrefix(msg, "fatal: "))
 	}
+	gotPassword := false
 	sc := bufio.NewScanner(bytes.NewReader(out))
 	for sc.Scan() {
 		k, v, _ := strings.Cut(sc.Text(), "=")
@@ -177,13 +226,37 @@ func gitCredential(ctx context.Context, rawURL string) (user, secret string, err
 		case "username":
 			user = v
 		case "password":
-			secret = v
+			secret, gotPassword = v, true
 		}
+	}
+	if gotPassword && secret == "" {
+		// Git Credential Manager answers this way for servers that use
+		// Windows sign-in (NTLM/Kerberos), which gx can't speak.
+		return "", "", fmt.Errorf("server returned no credential for %s (Windows sign-in?); set token_cmd to a PAT", u.Host)
 	}
 	if secret == "" {
 		return "", "", fmt.Errorf("nothing stored for %s", u.Host)
 	}
 	return user, secret, nil
+}
+
+// gitCredentialStore tells git's credential helpers that c worked (approve)
+// or was rejected (reject), so they store or forget it.
+func gitCredentialStore(ctx context.Context, rawURL string, c credential, approve bool) {
+	in, _, err := credentialInput(rawURL)
+	if err != nil {
+		return
+	}
+	action := "reject"
+	if approve {
+		action = "approve"
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "credential", action)
+	cmd.Env = append(os.Environ(), noPrompt...)
+	cmd.Stdin = strings.NewReader(in + "username=" + c.User + "\npassword=" + c.Secret + "\n\n")
+	_ = cmd.Run()
 }
 
 // ---- GitLab: token minted over SSH ----

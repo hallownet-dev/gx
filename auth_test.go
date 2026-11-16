@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -52,7 +54,7 @@ func TestGitCredentialHelper(t *testing.T) {
 		t.Skip("shell helper")
 	}
 	isolateGit(t, fakeHelper)
-	user, secret, err := gitCredential(context.Background(), "https://devops.example.com/tfs/Coll")
+	user, secret, err := gitCredential(context.Background(), "https://devops.example.com/tfs/Coll", false)
 	if err != nil || user != "alice" || secret != "s3cret" {
 		t.Fatalf("got %q %q %v", user, secret, err)
 	}
@@ -61,7 +63,7 @@ func TestGitCredentialHelper(t *testing.T) {
 func TestGitCredentialNothingStoredDoesNotHang(t *testing.T) {
 	isolateGit(t, "")
 	start := time.Now()
-	_, _, err := gitCredential(context.Background(), "https://example.invalid")
+	_, _, err := gitCredential(context.Background(), "https://example.invalid", false)
 	if err == nil || !strings.Contains(err.Error(), "nothing stored") {
 		t.Fatalf("expected 'nothing stored' error, got %v", err)
 	}
@@ -174,5 +176,86 @@ func TestSSHTarget(t *testing.T) {
 		if target != want[0] || port != want[1] {
 			t.Errorf("%q: got %s %s", in, target, port)
 		}
+	}
+}
+
+// loggingHelper returns a credential helper that records each action (get,
+// store, erase) in a log file and answers get with username/password.
+func loggingHelper(t *testing.T, user, pass string) (helper, log string) {
+	log = filepath.ToSlash(filepath.Join(t.TempDir(), "helper.log"))
+	helper = `!f() { echo "$1" >> '` + log + `'; cat >/dev/null; test "$1" = get || exit 0; printf 'username=` + user + `\npassword=` + pass + `\n'; }; f`
+	return helper, log
+}
+
+func helperLog(t *testing.T, log string) string {
+	b, _ := os.ReadFile(log)
+	return string(b)
+}
+
+func TestSignInApprovesOnSuccess(t *testing.T) {
+	helper, log := loggingHelper(t, "alice", "s3cret")
+	isolateGit(t, helper)
+	srv := azureServer(t, func(r *http.Request) bool {
+		_, pass, ok := r.BasicAuth()
+		return ok && pass == "s3cret"
+	})
+	p := ProviderConfig{Type: "azure", URL: srv.URL + "/Coll", Host: "127.0.0.1"}
+	rs, err := p.signIn(context.Background())
+	if err != nil || len(rs) != 1 {
+		t.Fatalf("got %v %v", rs, err)
+	}
+	if l := helperLog(t, log); !strings.Contains(l, "store") {
+		t.Fatalf("credential not approved; helper log: %q", l)
+	}
+}
+
+func TestRejectOn401GitCredential(t *testing.T) {
+	helper, log := loggingHelper(t, "alice", "stale")
+	isolateGit(t, helper)
+	srv := azureServer(t, func(*http.Request) bool { return false })
+	p := ProviderConfig{Type: "azure", URL: srv.URL + "/Coll", Host: "127.0.0.1"}
+	_, _, err := p.list(context.Background())
+	if err == nil || !needsSignIn(err) {
+		t.Fatalf("want a sign-in error, got %v", err)
+	}
+	if l := helperLog(t, log); !strings.Contains(l, "erase") {
+		t.Fatalf("stale credential not rejected; helper log: %q", l)
+	}
+}
+
+func TestNoRejectForToken(t *testing.T) {
+	helper, log := loggingHelper(t, "alice", "s3cret")
+	isolateGit(t, helper)
+	srv := azureServer(t, func(*http.Request) bool { return false })
+	p := ProviderConfig{Type: "azure", URL: srv.URL + "/Coll", Host: "127.0.0.1", Token: "x"}
+	if _, _, err := p.list(context.Background()); err == nil {
+		t.Fatal("want an error")
+	}
+	if l := helperLog(t, log); strings.Contains(l, "erase") {
+		t.Fatalf("a token failure must not erase git credentials; helper log: %q", l)
+	}
+}
+
+func TestNeedsSignIn(t *testing.T) {
+	yes := []error{fmt.Errorf("x: %w", errNoCredential), &statusError{code: 401}, fmt.Errorf("wrapped: %w", &statusError{code: 401})}
+	no := []error{&statusError{code: 500}, errors.New("dial tcp: connection refused"), nil}
+	for _, e := range yes {
+		if !needsSignIn(e) {
+			t.Errorf("needsSignIn(%v) = false", e)
+		}
+	}
+	for _, e := range no {
+		if needsSignIn(e) {
+			t.Errorf("needsSignIn(%v) = true", e)
+		}
+	}
+}
+
+func TestGitCredentialEmptyPassword(t *testing.T) {
+	helper, _ := loggingHelper(t, "", "")
+	isolateGit(t, helper)
+	_, _, err := gitCredential(context.Background(), "https://devops.example.com/tfs/Coll", false)
+	if err == nil || !strings.Contains(err.Error(), "Windows sign-in") {
+		t.Fatalf("got %v", err)
 	}
 }
