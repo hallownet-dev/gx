@@ -59,6 +59,9 @@ func (p ProviderConfig) credential(ctx context.Context) (credential, error) {
 		if err == nil {
 			return c, nil
 		}
+		if errors.Is(err, errWindowsSignIn) {
+			return credential{}, err // signing in again wouldn't help
+		}
 		errs = append(errs, m+": "+err.Error())
 	}
 	return credential{}, fmt.Errorf("%w (%s)", errNoCredential, strings.Join(errs, "; "))
@@ -69,21 +72,35 @@ const signInHint = "run gx l in a terminal to sign in"
 // errNoCredential means no auth method produced a credential.
 var errNoCredential = errors.New("no credentials")
 
-// needsSignIn reports whether err means the user has to sign in: nothing was
-// stored, or the server rejected what was.
-func needsSignIn(err error) bool {
-	var se *statusError
-	return errors.Is(err, errNoCredential) || errors.As(err, &se) && se.code == http.StatusUnauthorized
-}
+// errWindowsSignIn means Git Credential Manager answered with an empty
+// credential, which it does for servers using Windows sign-in (NTLM/Kerberos).
+var errWindowsSignIn = errors.New("server returned no credential (Windows sign-in?); set token_cmd to a PAT")
 
-// canSignIn reports whether p can get a credential from an interactive
-// git credential fill.
-func (p ProviderConfig) canSignIn() bool { return slices.Contains(p.modes(), "git-credential") }
+// offerSignIn reports whether an interactive git sign-in can fix a listing
+// that failed with err after using the given auth method: nothing was
+// stored, or the server rejected the git credential. A rejected gh/glab token
+// or a configured token is not something a git sign-in replaces.
+func (p ProviderConfig) offerSignIn(err error, method string) bool {
+	if !slices.Contains(p.modes(), "git-credential") {
+		return false
+	}
+	var se *statusError
+	return errors.Is(err, errNoCredential) ||
+		method == "git-credential" && errors.As(err, &se) && se.code == http.StatusUnauthorized
+}
 
 // signIn asks git's credential helpers for a credential with prompting
 // allowed (Git Credential Manager opens a browser or asks for a PAT, plain
-// git asks in the terminal), lists with it, and stores it on success.
-func (p ProviderConfig) signIn(ctx context.Context) ([]Remote, error) {
+// git asks in the terminal), lists with it, and stores it on success. With
+// stale, the stored credential the server rejected is forgotten first, so
+// the helper asks instead of handing it back. This is the only place gx
+// changes what credential helpers store.
+func (p ProviderConfig) signIn(ctx context.Context, stale bool) ([]Remote, error) {
+	if stale {
+		if user, secret, err := gitCredential(ctx, p.credentialURL(), false); err == nil {
+			gitCredentialStore(ctx, p.credentialURL(), credential{User: user, Secret: secret}, false)
+		}
+	}
 	user, secret, err := gitCredential(ctx, p.credentialURL(), true)
 	if err != nil {
 		return nil, err
@@ -91,7 +108,13 @@ func (p ProviderConfig) signIn(ctx context.Context) ([]Remote, error) {
 	if p.Username != "" && user == "" {
 		user = p.Username
 	}
-	return p.listCred(ctx, credential{Method: "git-credential", User: user, Secret: secret})
+	cred := credential{Method: "git-credential", User: user, Secret: secret}
+	rs, err := p.listCred(ctx, cred)
+	var se *statusError
+	if err == nil || errors.As(err, &se) && se.code == http.StatusUnauthorized {
+		gitCredentialStore(ctx, p.credentialURL(), cred, err == nil)
+	}
+	return rs, err
 }
 
 func (p ProviderConfig) credentialVia(ctx context.Context, mode string, renew bool) (credential, error) {
@@ -234,7 +257,7 @@ func gitCredential(ctx context.Context, rawURL string, interactive bool) (user, 
 	if gotPassword && secret == "" {
 		// Git Credential Manager answers this way for servers that use
 		// Windows sign-in (NTLM/Kerberos), which gx can't speak.
-		return "", "", fmt.Errorf("server returned no credential for %s (Windows sign-in?); set token_cmd to a PAT", u.Host)
+		return "", "", fmt.Errorf("%s: %w", u.Host, errWindowsSignIn)
 	}
 	if secret == "" {
 		return "", "", fmt.Errorf("nothing stored for %s", u.Host)

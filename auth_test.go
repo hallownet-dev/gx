@@ -200,26 +200,50 @@ func TestSignInApprovesOnSuccess(t *testing.T) {
 		return ok && pass == "s3cret"
 	})
 	p := ProviderConfig{Type: "azure", URL: srv.URL + "/Coll", Host: "127.0.0.1"}
-	rs, err := p.signIn(context.Background())
+	rs, err := p.signIn(context.Background(), false)
 	if err != nil || len(rs) != 1 {
 		t.Fatalf("got %v %v", rs, err)
 	}
-	if l := helperLog(t, log); !strings.Contains(l, "store") {
-		t.Fatalf("credential not approved; helper log: %q", l)
+	if l := helperLog(t, log); !strings.Contains(l, "store") || strings.Contains(l, "erase") {
+		t.Fatalf("want approve and no reject; helper log: %q", l)
 	}
 }
 
-func TestRejectOn401GitCredential(t *testing.T) {
-	helper, log := loggingHelper(t, "alice", "stale")
+func TestSignInRejectsStaleFirst(t *testing.T) {
+	helper, log := loggingHelper(t, "alice", "s3cret")
 	isolateGit(t, helper)
-	srv := azureServer(t, func(*http.Request) bool { return false })
+	srv := azureServer(t, func(r *http.Request) bool {
+		_, pass, ok := r.BasicAuth()
+		return ok && pass == "s3cret"
+	})
 	p := ProviderConfig{Type: "azure", URL: srv.URL + "/Coll", Host: "127.0.0.1"}
-	_, _, err := p.list(context.Background())
-	if err == nil || !needsSignIn(err) {
-		t.Fatalf("want a sign-in error, got %v", err)
+	if _, err := p.signIn(context.Background(), true); err != nil {
+		t.Fatal(err)
 	}
-	if l := helperLog(t, log); !strings.Contains(l, "erase") {
-		t.Fatalf("stale credential not rejected; helper log: %q", l)
+	l := helperLog(t, log)
+	if e, s := strings.Index(l, "erase"), strings.Index(l, "store"); e < 0 || s < e {
+		t.Fatalf("want the stale credential erased before the new one is stored; helper log: %q", l)
+	}
+}
+
+// A plain listing (doctor, scripts, declined prompt) never changes what the
+// credential helper stores.
+func TestPlainListNeverTouchesStore(t *testing.T) {
+	for _, accept := range []bool{true, false} {
+		helper, log := loggingHelper(t, "alice", "s3cret")
+		isolateGit(t, helper)
+		srv := azureServer(t, func(*http.Request) bool { return accept })
+		p := ProviderConfig{Type: "azure", URL: srv.URL + "/Coll", Host: "127.0.0.1"}
+		_, method, err := p.list(context.Background())
+		if accept != (err == nil) {
+			t.Fatalf("accept=%v: got %v", accept, err)
+		}
+		if !accept && !p.offerSignIn(err, method) {
+			t.Fatalf("a 401 on a git credential should offer sign-in")
+		}
+		if l := helperLog(t, log); strings.Contains(l, "store") || strings.Contains(l, "erase") {
+			t.Fatalf("accept=%v: helper log: %q", accept, l)
+		}
 	}
 }
 
@@ -236,18 +260,47 @@ func TestNoRejectForToken(t *testing.T) {
 	}
 }
 
-func TestNeedsSignIn(t *testing.T) {
-	yes := []error{fmt.Errorf("x: %w", errNoCredential), &statusError{code: 401}, fmt.Errorf("wrapped: %w", &statusError{code: 401})}
-	no := []error{&statusError{code: 500}, errors.New("dial tcp: connection refused"), nil}
-	for _, e := range yes {
-		if !needsSignIn(e) {
-			t.Errorf("needsSignIn(%v) = false", e)
+func TestOfferSignIn(t *testing.T) {
+	p := ProviderConfig{Type: "github", Host: "github.com"}
+	type c struct {
+		err    error
+		method string
+	}
+	yes := []c{
+		{fmt.Errorf("x: %w", errNoCredential), ""},
+		{&statusError{code: 401}, "git-credential"},
+		{fmt.Errorf("wrapped: %w", &statusError{code: 401}), "git-credential"},
+	}
+	no := []c{
+		{&statusError{code: 401}, "gh"}, // a git sign-in can't fix a rejected gh token
+		{&statusError{code: 500}, "git-credential"},
+		{errors.New("dial tcp: connection refused"), "git-credential"},
+		{fmt.Errorf("x: %w", errWindowsSignIn), ""},
+		{nil, ""},
+	}
+	for _, x := range yes {
+		if !p.offerSignIn(x.err, x.method) {
+			t.Errorf("offerSignIn(%v, %q) = false", x.err, x.method)
 		}
 	}
-	for _, e := range no {
-		if needsSignIn(e) {
-			t.Errorf("needsSignIn(%v) = true", e)
+	for _, x := range no {
+		if p.offerSignIn(x.err, x.method) {
+			t.Errorf("offerSignIn(%v, %q) = true", x.err, x.method)
 		}
+	}
+	if (ProviderConfig{Type: "azure", Token: "x"}).offerSignIn(fmt.Errorf("%w", errNoCredential), "") {
+		t.Error("a token-only provider can't sign in through git")
+	}
+}
+
+// A Windows-sign-in server must not be offered a sign-in that can't work.
+func TestWindowsSignInNotOffered(t *testing.T) {
+	helper, _ := loggingHelper(t, "", "")
+	isolateGit(t, helper)
+	p := ProviderConfig{Type: "azure", URL: "https://devops.example.com/tfs/Coll", Host: "devops.example.com"}
+	_, method, err := p.list(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "token_cmd") || p.offerSignIn(err, method) {
+		t.Fatalf("got %v (offer=%v)", err, p.offerSignIn(err, method))
 	}
 }
 

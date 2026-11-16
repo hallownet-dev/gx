@@ -211,7 +211,7 @@ You usually don't need to create tokens. Without `token`, `token_env` or `token_
 
 **git credential helper** means whatever git itself uses for HTTPS: Git Credential Manager, macOS Keychain, libsecret, `pass`… If you have cloned from a host over HTTPS once, gx can list its repos.
 
-If nothing usable is stored, `gx l` run in a terminal offers to sign in once: Git Credential Manager opens the browser for dev.azure.com, or asks for a PAT on Azure DevOps Server (without GCM, git asks in the terminal: any username, and a PAT as the password). A credential that works is saved for `git clone` too; one the server rejects is forgotten, so the next `gx l` asks again. Scripts and `gx doctor` never prompt; they print a hint instead.
+If nothing usable is stored, `gx l` run in a terminal offers to sign in once: Git Credential Manager opens the browser for dev.azure.com, or asks for a PAT on Azure DevOps Server (without GCM, git asks in the terminal: any username, and a PAT as the password). The new credential is saved through your credential helper, so `git clone` uses it too. If the server rejected the stored one, signing in replaces it. Scripts and `gx doctor` never prompt or change stored credentials; they print a hint instead.
 
 Collections on one Azure DevOps Server share a stored credential (git keys it by host), so use a PAT that covers all of them, or `token_cmd` per provider. Servers that only accept Windows sign-in (NTLM/Kerberos) need `token_cmd` with a PAT.
 
